@@ -1,4 +1,4 @@
-﻿using C = ClientPackets;
+using C = ClientPackets;
 using Server.MirDatabase;
 using Server.MirEnvir;
 using Server.MirNetwork;
@@ -7006,13 +7006,26 @@ namespace Server.MirObjects
         }
         public void DropGold(uint gold)
         {
-            if (Account.Gold < gold) return;
+            if (gold == 0) return;
+            uint requested = gold;
+            // Enforce per-action limit (log attempt if capping)
+            if (gold > Settings.Security_DropGoldMax)
+            {
+                SecurityLog.Economy(Account?.AccountID, Info?.Name, "attempt_drop", requested, Account.Gold, Account.Gold, $"cappedTo={Settings.Security_DropGoldMax}");
+                gold = Settings.Security_DropGoldMax;
+            }
+            // Ensure sufficient balance prior to spawning the gold object
+            if (Account.Gold < gold)
+            {
+                SecurityLog.Economy(Account?.AccountID, Info?.Name, "attempt_drop_insufficient", requested, Account.Gold, Account.Gold, $"required={gold}");
+                return;
+            }
 
             ItemObject ob = new ItemObject(this, gold);
-
             if (!ob.Drop(5)) return;
-            Account.Gold -= gold;
-            Enqueue(new S.LoseGold { Gold = gold });
+
+            // Charge after successful drop placement
+            SpendGold(gold, "drop");
         }
         public void PickUp()
         {
@@ -7177,14 +7190,38 @@ namespace Server.MirObjects
         }
         public void GainGold(uint gold)
         {
-            if (gold == 0) return;
+            GainGold(gold, "unspecified");
+        }
 
-            if (((UInt64)Account.Gold + gold) > uint.MaxValue)
+        public void GainGold(uint gold, string reason)
+        {
+            if (gold == 0) return;
+            // Clamp per-op
+            if (gold > Settings.Security_MaxGoldPerOp) gold = Settings.Security_MaxGoldPerOp;
+
+            // Clamp to avoid overflow
+            if (((ulong)Account.Gold + gold) > uint.MaxValue)
                 gold = uint.MaxValue - Account.Gold;
 
+            uint before = Account.Gold;
             Account.Gold += gold;
-
             Enqueue(new S.GainedGold { Gold = gold });
+            SecurityLog.Economy(Account?.AccountID, Info?.Name, "gain", gold, before, Account.Gold, reason);
+        }
+
+        public bool SpendGold(uint gold, string reason)
+        {
+            if (gold == 0) return false;
+            // Clamp per-op
+            if (gold > Settings.Security_MaxGoldPerOp) gold = Settings.Security_MaxGoldPerOp;
+
+            if (Account.Gold < gold) return false;
+
+            uint before = Account.Gold;
+            Account.Gold -= gold;
+            Enqueue(new S.LoseGold { Gold = gold });
+            SecurityLog.Economy(Account?.AccountID, Info?.Name, "spend", gold, before, Account.Gold, reason);
+            return true;
         }
         public void GainCredit(uint credit)
         {
@@ -9865,15 +9902,14 @@ namespace Server.MirObjects
 
             if (TradePartner == null) return;
 
-            if (amount < 1 || Account.Gold < amount)
-            {
-                return;
-            }
+            if (amount < 1) return;
+            // Cap amount to configured per-trade maximum
+            if (amount > Settings.Security_TradeGoldMax) amount = Settings.Security_TradeGoldMax;
+            if (Account.Gold < amount) return;
 
             TradeGoldAmount += amount;
-            Account.Gold -= amount;
-
-            Enqueue(new S.LoseGold { Gold = amount });
+            // Deduct safely and audit
+            SpendGold(amount, "trade_send");
             TradePartner.Enqueue(new S.TradeGold { Amount = TradeGoldAmount });
         }
         public void TradeItem()

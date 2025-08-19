@@ -17,6 +17,7 @@ namespace Server
             ConfigPath = Path.Combine(".", "Configs"),
             MapPath = Path.Combine(".", "Maps"),
             ExportPath = Path.Combine(".", "Exports"),
+            LogsPath = Path.Combine(".", "Logs"),
             GuildPath = Path.Combine(".", "Guilds"),
             ConquestsPath = Path.Combine(".", "Conquests"),
             NPCPath = Path.Combine(EnvirPath, "NPCs"),
@@ -61,6 +62,15 @@ namespace Server
         // Idle CPU reduction (opt-in)
         public static bool EnableIdleSleep = false;               // If true, sleep briefly when idle
         public static int IdleSleepMs = 1;                        // Sleep duration in milliseconds when idle
+
+        // Security (economy & logging)
+        public static bool EnableSecurityLogs = true;             // If true, write dedicated security logs
+        public static bool SecurityLogToFile = true;              // If true, append to Envir/Security.log
+        public static int SecurityLogRetentionDays = 14;          // Retain security log files for N days (rolling)
+        public static int Security_EconomyMinIntervalMs = 250;    // Min interval between economy actions per player
+        public static uint Security_MaxGoldPerOp = 100_000_000;   // Max gold that can be changed in a single op
+        public static uint Security_DropGoldMax = 1_000_000;      // Max gold allowed in a single drop action
+        public static uint Security_TradeGoldMax = 10_000_000;    // Max gold allowed in a single trade send action
 
         public static string DefaultNPCFilename = "00Default";
         public static string MonsterNPCFilename = "00Monster";
@@ -420,6 +430,15 @@ namespace Server
             EnableIdleSleep = Reader.ReadBoolean("Performance", "EnableIdleSleep", EnableIdleSleep);
             IdleSleepMs = Reader.ReadInt32("Performance", "IdleSleepMs", IdleSleepMs);
 
+            // Security
+            EnableSecurityLogs = Reader.ReadBoolean("Security", "EnableSecurityLogs", EnableSecurityLogs);
+            SecurityLogToFile = Reader.ReadBoolean("Security", "SecurityLogToFile", SecurityLogToFile);
+            SecurityLogRetentionDays = Reader.ReadInt32("Security", "SecurityLogRetentionDays", SecurityLogRetentionDays);
+            Security_EconomyMinIntervalMs = Reader.ReadInt32("Security", "EconomyMinIntervalMs", Security_EconomyMinIntervalMs);
+            Security_MaxGoldPerOp = Reader.ReadUInt32("Security", "MaxGoldPerOp", Security_MaxGoldPerOp);
+            Security_DropGoldMax = Reader.ReadUInt32("Security", "DropGoldMax", Security_DropGoldMax);
+            Security_TradeGoldMax = Reader.ReadUInt32("Security", "TradeGoldMax", Security_TradeGoldMax);
+
             //Database
             SaveDelay = Reader.ReadInt32("Database", "SaveDelay", SaveDelay);
             CredxGold = Reader.ReadInt16("Database", "CredxGold", CredxGold);
@@ -559,6 +578,8 @@ namespace Server
                 Directory.CreateDirectory(NameListPath);
             if (!Directory.Exists(RecipePath))
                 Directory.CreateDirectory(RecipePath);
+            if (!Directory.Exists(LogsPath))
+                Directory.CreateDirectory(LogsPath);
 
             string fileName = Path.Combine(Settings.NPCPath, DefaultNPCFilename + ".txt");
 

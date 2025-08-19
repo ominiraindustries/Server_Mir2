@@ -22,3 +22,21 @@ PerfLogIntervalSeconds=30
 ; Si no hay jugadores online o el tick no procesó nada, duerme el hilo brevemente
 EnableIdleSleep=false
 IdleSleepMs=1
+
+[Security]
+; Habilitar logs de seguridad de economía (solo eventos sensibles)
+EnableSecurityLogs=true
+
+; Escribir logs a fichero (Envir/Security_YYYYMMDD.log)
+SecurityLogToFile=true
+
+; Días a conservar logs de seguridad (no implementa rotación aún; informativo)
+SecurityLogRetentionDays=14
+
+; Intervalo mínimo entre acciones de economía por jugador (ms)
+EconomyMinIntervalMs=250
+
+; Límites de oro por operación y por acción
+MaxGoldPerOp=100000000
+DropGoldMax=1000000
+TradeGoldMax=10000000
