@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Windows.Forms;
@@ -52,6 +52,7 @@ namespace Server
             this.levelHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.classHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.genderHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
+            this.goldHeader = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.StatusBar = new System.Windows.Forms.StatusStrip();
             this.PlayersLabel = new System.Windows.Forms.ToolStripStatusLabel();
             this.MonsterLabel = new System.Windows.Forms.ToolStripStatusLabel();
@@ -221,6 +222,7 @@ namespace Server
             // 
             this.tabPage4.BackColor = System.Drawing.SystemColors.Control;
             this.tabPage4.Controls.Add(this.PlayersOnlineListView);
+            this.tabPage4.Controls.Add(this.groupBoxGiveGold);
             this.tabPage4.Location = new System.Drawing.Point(4, 22);
             this.tabPage4.Name = "tabPage4";
             this.tabPage4.Padding = new System.Windows.Forms.Padding(3);
@@ -237,7 +239,8 @@ namespace Server
             this.nameHeader,
             this.levelHeader,
             this.classHeader,
-            this.genderHeader});
+            this.genderHeader,
+            this.goldHeader});
             this.PlayersOnlineListView.Dock = System.Windows.Forms.DockStyle.Fill;
             this.PlayersOnlineListView.FullRowSelect = true;
             this.PlayersOnlineListView.GridLines = true;
@@ -276,6 +279,56 @@ namespace Server
             // 
             this.genderHeader.Text = "Gender";
             this.genderHeader.Width = 98;
+            // 
+            // goldHeader
+            // 
+            this.goldHeader.Text = "Gold";
+            this.goldHeader.Width = 100;
+            // 
+            // groupBoxGiveGold
+            // 
+            this.groupBoxGiveGold = new System.Windows.Forms.GroupBox();
+            this.groupBoxGiveGold.Dock = System.Windows.Forms.DockStyle.Bottom;
+            this.groupBoxGiveGold.Location = new System.Drawing.Point(3, 274);
+            this.groupBoxGiveGold.Name = "groupBoxGiveGold";
+            this.groupBoxGiveGold.Size = new System.Drawing.Size(471, 43);
+            this.groupBoxGiveGold.TabIndex = 1;
+            this.groupBoxGiveGold.TabStop = false;
+            this.groupBoxGiveGold.Text = "Give Gold to Selected";
+            // 
+            // GiveGoldTextBox
+            // 
+            this.GiveGoldTextBox = new System.Windows.Forms.TextBox();
+            this.GiveGoldTextBox.Location = new System.Drawing.Point(6, 16);
+            this.GiveGoldTextBox.Name = "GiveGoldTextBox";
+            this.GiveGoldTextBox.Size = new System.Drawing.Size(120, 20);
+            this.GiveGoldTextBox.TabIndex = 0;
+            // 
+            // GiveGoldButton
+            // 
+            this.GiveGoldButton = new System.Windows.Forms.Button();
+            this.GiveGoldButton.Location = new System.Drawing.Point(132, 14);
+            this.GiveGoldButton.Name = "GiveGoldButton";
+            this.GiveGoldButton.Size = new System.Drawing.Size(75, 23);
+            this.GiveGoldButton.TabIndex = 1;
+            this.GiveGoldButton.Text = "Give";
+            this.GiveGoldButton.UseVisualStyleBackColor = true;
+            this.GiveGoldButton.Click += new System.EventHandler(this.GiveGoldButton_Click);
+            // 
+            // TakeGoldButton
+            // 
+            this.TakeGoldButton = new System.Windows.Forms.Button();
+            this.TakeGoldButton.Location = new System.Drawing.Point(213, 14);
+            this.TakeGoldButton.Name = "TakeGoldButton";
+            this.TakeGoldButton.Size = new System.Drawing.Size(75, 23);
+            this.TakeGoldButton.TabIndex = 2;
+            this.TakeGoldButton.Text = "Take";
+            this.TakeGoldButton.UseVisualStyleBackColor = true;
+            this.TakeGoldButton.Click += new System.EventHandler(this.TakeGoldButton_Click);
+
+            this.groupBoxGiveGold.Controls.Add(this.GiveGoldTextBox);
+            this.groupBoxGiveGold.Controls.Add(this.GiveGoldButton);
+            this.groupBoxGiveGold.Controls.Add(this.TakeGoldButton);
             // 
             // StatusBar
             // 
@@ -762,6 +815,11 @@ namespace Server
         private ToolStripMenuItem dropBuilderToolStripMenuItem;
         private ToolStripStatusLabel BlockedIPsLabel;
         private ToolStripMenuItem clearBlockedIPsToolStripMenuItem;
+        private System.Windows.Forms.ColumnHeader goldHeader;
+        private System.Windows.Forms.GroupBox groupBoxGiveGold;
+        private System.Windows.Forms.TextBox GiveGoldTextBox;
+        private System.Windows.Forms.Button GiveGoldButton;
+        private System.Windows.Forms.Button TakeGoldButton;
     }
 }
 

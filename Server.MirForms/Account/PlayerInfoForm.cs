@@ -1,4 +1,4 @@
-﻿using Server.MirDatabase;
+using Server.MirDatabase;
 using Server.MirObjects;
 
 namespace Server
@@ -35,7 +35,8 @@ namespace Server
             NameTextBox.Text = Character.Name;
             LevelTextBox.Text = Character.Level.ToString();
 
-            GoldLabel.Text = $"{Character.AccountInfo.Gold:n0}";
+            // Show per-character gold
+            GoldLabel.Text = $"{Character.Gold:n0}";
 
             if (Character.Player != null)
                 CurrentMapLabel.Text =
@@ -131,6 +132,41 @@ namespace Server
             AccountInfoForm form = new AccountInfoForm(accountId, true);
 
             form.ShowDialog();
+        }
+
+        private void GiveGoldButton_Click(object sender, EventArgs e)
+        {
+            if (!uint.TryParse(GiveGoldTextBox.Text, out uint amount) || amount == 0) return;
+
+            if (Character.Player != null)
+            {
+                Character.Player.GainGold(amount, "admin_gui_give_gold");
+            }
+            else
+            {
+                // Offline: adjust stored character gold
+                ulong total = (ulong)Character.Gold + amount;
+                Character.Gold = (uint)Math.Min(total, uint.MaxValue);
+            }
+
+            UpdatePlayerInfo();
+        }
+
+        private void TakeGoldButton_Click(object sender, EventArgs e)
+        {
+            if (!uint.TryParse(GiveGoldTextBox.Text, out uint amount) || amount == 0) return;
+
+            if (Character.Player != null)
+            {
+                Character.Player.SpendGold(amount, "admin_gui_take_gold");
+            }
+            else
+            {
+                // Offline: clamp to zero
+                Character.Gold = amount >= Character.Gold ? 0u : Character.Gold - amount;
+            }
+
+            UpdatePlayerInfo();
         }
 
     }

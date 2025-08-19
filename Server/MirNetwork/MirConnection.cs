@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Net.Sockets;
 using Server.MirDatabase;
 using Server.MirEnvir;
@@ -960,8 +960,27 @@ namespace Server.MirNetwork
             //    return;
             //}
 
+            // One-time gold migration from Account to Character on start (no schema change required)
+            uint migrateAmount = 0;
+            if (Account.Gold > 0)
+            {
+                // Determine how much can be migrated without overflow
+                uint capacity = uint.MaxValue - info.Gold;
+                migrateAmount = Account.Gold > capacity ? capacity : Account.Gold;
+                if (migrateAmount > 0)
+                {
+                    Account.Gold -= migrateAmount; // decrease legacy account gold; persistence handled by normal saves
+                }
+            }
+
             Player = new PlayerObject(info, this);
             Player.StartGame();
+
+            if (migrateAmount > 0)
+            {
+                // Apply to character with proper logging and client update
+                Player.GainGold(migrateAmount, "migrate_account_gold");
+            }
         }
 
         public void LogOut()

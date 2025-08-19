@@ -1,4 +1,4 @@
-﻿namespace Server
+namespace Server
 {
     partial class PlayerInfoForm
     {
@@ -40,6 +40,9 @@
             this.SendMessageButton = new System.Windows.Forms.Button();
             this.groupBox1 = new System.Windows.Forms.GroupBox();
             this.groupBox2 = new System.Windows.Forms.GroupBox();
+            this.GiveGoldTextBox = new System.Windows.Forms.TextBox();
+            this.GiveGoldButton = new System.Windows.Forms.Button();
+            this.TakeGoldButton = new System.Windows.Forms.Button();
             this.SafeZoneButton = new System.Windows.Forms.Button();
             this.label9 = new System.Windows.Forms.Label();
             this.ChatBanExpiryTextBox = new System.Windows.Forms.TextBox();
@@ -184,6 +187,34 @@
             this.groupBox2.TabStop = false;
             this.groupBox2.Text = "Actions";
             // 
+            // GiveGoldTextBox
+            // 
+            this.GiveGoldTextBox.Location = new System.Drawing.Point(12, 32);
+            this.GiveGoldTextBox.Name = "GiveGoldTextBox";
+            this.GiveGoldTextBox.Size = new System.Drawing.Size(129, 20);
+            this.GiveGoldTextBox.TabIndex = 24;
+            this.GiveGoldTextBox.Text = "0";
+            // 
+            // GiveGoldButton
+            // 
+            this.GiveGoldButton.Location = new System.Drawing.Point(147, 31);
+            this.GiveGoldButton.Name = "GiveGoldButton";
+            this.GiveGoldButton.Size = new System.Drawing.Size(45, 23);
+            this.GiveGoldButton.TabIndex = 25;
+            this.GiveGoldButton.Text = "Give";
+            this.GiveGoldButton.UseVisualStyleBackColor = true;
+            this.GiveGoldButton.Click += new System.EventHandler(this.GiveGoldButton_Click);
+            // 
+            // TakeGoldButton
+            // 
+            this.TakeGoldButton.Location = new System.Drawing.Point(198, 31);
+            this.TakeGoldButton.Name = "TakeGoldButton";
+            this.TakeGoldButton.Size = new System.Drawing.Size(45, 23);
+            this.TakeGoldButton.TabIndex = 26;
+            this.TakeGoldButton.Text = "Take";
+            this.TakeGoldButton.UseVisualStyleBackColor = true;
+            this.TakeGoldButton.Click += new System.EventHandler(this.TakeGoldButton_Click);
+            // 
             // SafeZoneButton
             // 
             this.SafeZoneButton.Location = new System.Drawing.Point(87, 19);
@@ -313,7 +344,7 @@
             this.label7.Name = "label7";
             this.label7.Size = new System.Drawing.Size(65, 13);
             this.label7.TabIndex = 21;
-            this.label7.Text = "Total Gold : ";
+            this.label7.Text = "Gold : ";
             // 
             // GoldLabel
             // 
@@ -371,11 +402,37 @@
             this.OpenAccountButton.UseVisualStyleBackColor = true;
             this.OpenAccountButton.Click += new System.EventHandler(this.OpenAccountButton_Click);
             // 
+            // groupBoxGold
+            // 
+            this.groupBoxGold = new System.Windows.Forms.GroupBox();
+            this.groupBoxGold.Location = new System.Drawing.Point(209, 154);
+            this.groupBoxGold.Name = "groupBoxGold";
+            this.groupBoxGold.Size = new System.Drawing.Size(249, 113);
+            this.groupBoxGold.TabIndex = 26;
+            this.groupBoxGold.TabStop = false;
+            this.groupBoxGold.Text = "Gold Actions";
+            // Move existing controls into this group box
+            this.groupBoxGold.Controls.Add(this.amountLabel);
+            this.groupBoxGold.Controls.Add(this.GiveGoldTextBox);
+            this.groupBoxGold.Controls.Add(this.GiveGoldButton);
+            this.groupBoxGold.Controls.Add(this.TakeGoldButton);
+            // 
+            // amountLabel
+            // 
+            this.amountLabel = new System.Windows.Forms.Label();
+            this.amountLabel.AutoSize = true;
+            this.amountLabel.Location = new System.Drawing.Point(9, 16);
+            this.amountLabel.Name = "amountLabel";
+            this.amountLabel.Size = new System.Drawing.Size(52, 13);
+            this.amountLabel.TabIndex = 27;
+            this.amountLabel.Text = "Amount:";
+            // 
             // PlayerInfoForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(466, 328);
+            this.Controls.Add(this.groupBoxGold);
             this.Controls.Add(this.groupBox4);
             this.Controls.Add(this.groupBox3);
             this.Controls.Add(this.groupBox2);
@@ -427,5 +484,10 @@
         private System.Windows.Forms.Label label9;
         private System.Windows.Forms.Button SafeZoneButton;
         private System.Windows.Forms.Button OpenAccountButton;
+        private System.Windows.Forms.TextBox GiveGoldTextBox;
+        private System.Windows.Forms.Button GiveGoldButton;
+        private System.Windows.Forms.Button TakeGoldButton;
+        private System.Windows.Forms.GroupBox groupBoxGold;
+        private System.Windows.Forms.Label amountLabel;
     }
 }

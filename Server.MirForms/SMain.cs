@@ -1,7 +1,9 @@
-﻿using Server.MirEnvir;
+using Server.MirEnvir;
 using Server.MirDatabase;
 using Server.MirForms.Systems;
 using Server.Database;
+using System.Linq;
+using System.Collections.Generic;
 
 namespace Server
 {
@@ -123,6 +125,7 @@ namespace Server
             ListItem.SubItems.Add(character.Level.ToString());
             ListItem.SubItems.Add(character.Class.ToString());
             ListItem.SubItems.Add(character.Gender.ToString());
+            ListItem.SubItems.Add(character.Gold.ToString());
 
             return ListItem;
         }
@@ -142,6 +145,62 @@ namespace Server
                     PlayersOnlineListView.Items.Add(tempItem);
                 }
             }
+            else
+            {
+                // Update existing rows with live data (resilient to sorting):
+                // Build a lookup from index -> ListViewItem
+                var itemByIndex = new Dictionary<int, ListViewItem>(PlayersOnlineListView.Items.Count);
+                foreach (ListViewItem it in PlayersOnlineListView.Items)
+                {
+                    if (int.TryParse(it.SubItems[0].Text, out int idx)) itemByIndex[idx] = it;
+                }
+
+                foreach (var player in Envir.Players)
+                {
+                    var character = player.Info;
+                    if (!itemByIndex.TryGetValue(character.Index, out var item)) continue;
+                    item.SubItems[1].Text = character.Name;
+                    item.SubItems[2].Text = character.Level.ToString();
+                    item.SubItems[3].Text = character.Class.ToString();
+                    item.SubItems[4].Text = character.Gender.ToString();
+                    item.SubItems[5].Text = character.Gold.ToString(); // Gold column
+                }
+            }
+        }
+
+        private void GiveGoldButton_Click(object sender, EventArgs e)
+        {
+            if (PlayersOnlineListView.SelectedItems.Count == 0) return;
+            var selected = PlayersOnlineListView.SelectedItems[0];
+            if (!uint.TryParse(GiveGoldTextBox.Text, out uint amount) || amount == 0) return;
+
+            if (!int.TryParse(selected.SubItems[0].Text, out int index)) return;
+
+            var player = Envir.Players.FirstOrDefault(p => p.Info.Index == index);
+            if (player == null) return;
+
+            player.GainGold(amount, "admin_gui_give_gold");
+
+            // Update UI immediately for the selected row
+            selected.SubItems[5].Text = player.Info.Gold.ToString();
+        }
+
+        private void TakeGoldButton_Click(object sender, EventArgs e)
+        {
+            if (PlayersOnlineListView.SelectedItems.Count == 0) return;
+            var selected = PlayersOnlineListView.SelectedItems[0];
+            if (!uint.TryParse(GiveGoldTextBox.Text, out uint amount) || amount == 0) return;
+
+            if (!int.TryParse(selected.SubItems[0].Text, out int index)) return;
+
+            var player = Envir.Players.FirstOrDefault(p => p.Info.Index == index);
+            if (player == null) return;
+
+            // SpendGold returns false if not enough gold; still refresh UI afterwards
+            player.SpendGold(amount, "admin_gui_take_gold");
+
+            // Update UI immediately for the selected row
+            selected.SubItems[5].Text = player.Info.Gold.ToString();
         }
 
         private void startServerToolStripMenuItem_Click(object sender, EventArgs e)

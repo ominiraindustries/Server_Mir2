@@ -51,6 +51,11 @@ Logs de seguridad:
 
 ## Changelog
 
+### 0.3.2
+- GUI: `PlayerInfoForm` añade recuadro "Gold Actions" (Give/Take) para oro por personaje (`Character.Gold`). Funciona con jugadores online y offline.
+- GUI: pestaña "Players Online" muestra columna de oro y refresco en vivo.
+- Fix: tipos `int/uint` en índices de personaje para evitar CS1503.
+
 ### 0.3.1
 - Fix: ahora se pueden soltar al suelo ítems equipados (Equipment -> Ground). Se eliminan correctamente del slot, se refrescan stats y se sincroniza la UI.
 - Auditoría: se agregan logs de ítems para `pickup`, `trade commit` y `drop` (incluye `src`, `dst`, mapa y coordenadas).

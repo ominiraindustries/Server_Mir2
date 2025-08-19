@@ -1,4 +1,4 @@
-﻿using Server.MirEnvir;
+using Server.MirEnvir;
 using Server.MirNetwork;
 using Server.MirObjects;
 
@@ -55,6 +55,7 @@ namespace Server.MirDatabase
 
         public int HP, MP;
         public long Experience;
+        public uint Gold;
 
         public AttackMode AMode;
         public PetMode PMode;
@@ -379,6 +380,16 @@ namespace Server.MirDatabase
 
             if (version > 100)
                 HeroBehaviour = (HeroBehaviour)reader.ReadByte();
+
+            // Character-level gold introduced in version > 105
+            if (version > 105)
+            {
+                Gold = reader.ReadUInt32();
+            }
+            else
+            {
+                Gold = 0; // default for legacy saves; migration handled elsewhere
+            }
         }
 
         public virtual void Save(BinaryWriter writer)
@@ -564,6 +575,9 @@ namespace Server.MirDatabase
             writer.Write(CurrentHeroIndex);
             writer.Write(HeroSpawned);
             writer.Write((byte)HeroBehaviour);
+
+            // Write character-level gold at the end for newer versions
+            writer.Write(Gold);
         }
 
         public SelectInfo ToSelectInfo()

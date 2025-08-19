@@ -1,4 +1,4 @@
-﻿using Server.MirDatabase;
+using Server.MirDatabase;
 using Server.MirEnvir;
 using System.Text.RegularExpressions;
 using S = ServerPackets;
@@ -1184,7 +1184,7 @@ namespace Server.MirObjects
             {
                 if (cost > player.Info.PearlCount) return;
             }
-            else if (cost > player.Account.Gold) return;
+            else if (cost > player.Info.Gold) return;
 
             UserItem item = (isBuyBack || isUsed) ? goods : Envir.CreateFreshItem(goods.Info);
             item.Count = goods.Count;
@@ -1197,8 +1197,7 @@ namespace Server.MirObjects
             }
             else
             {
-                player.Account.Gold -= cost;
-                player.Enqueue(new S.LoseGold { Gold = cost });
+                player.SpendGold(cost, "npc_buy");
 
                 if (callingNPC != null && callingNPC.Conq != null)
                 {
@@ -1258,7 +1257,7 @@ namespace Server.MirObjects
                 return;
             }
 
-            if (player.Account.Gold < (recipe.Gold * count))
+            if (player.Info.Gold < (recipe.Gold * count))
             {
                 player.Enqueue(p);
                 return;
@@ -1429,8 +1428,7 @@ namespace Server.MirObjects
             }
 
             //Take Gold
-            player.Account.Gold -= (recipe.Gold * count);
-            player.Enqueue(new S.LoseGold { Gold = (recipe.Gold * count) });
+            player.SpendGold((uint)(recipe.Gold * count), "craft");
 
             if (Envir.Random.Next(100) >= recipe.Chance + player.Stats[Stat.CraftRatePercent])
             {

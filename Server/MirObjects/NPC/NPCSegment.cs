@@ -1,4 +1,4 @@
-﻿using Server.MirDatabase;
+using Server.MirDatabase;
 using Server.MirEnvir;
 using System.Globalization;
 using System.Numerics;
@@ -1363,7 +1363,7 @@ namespace Server.MirObjects
                     newValue = player.Stats[Stat.MP].ToString(CultureInfo.InvariantCulture);
                     break;
                 case "GAMEGOLD":
-                    newValue = player.Account.Gold.ToString(CultureInfo.InvariantCulture);
+                    newValue = player.Info.Gold.ToString(CultureInfo.InvariantCulture);
                     break;
                 case "CREDIT":
                     newValue = player.Account.Credit.ToString(CultureInfo.InvariantCulture);
@@ -1954,7 +1954,7 @@ namespace Server.MirObjects
 
                         try
                         {
-                            failed = !Compare(param[0], player.Account.Gold, tempUint);
+                            failed = !Compare(param[0], player.Info.Gold, tempUint);
                         }
                         catch (ArgumentException)
                         {
@@ -2826,21 +2826,19 @@ namespace Server.MirObjects
                         {
                             if (!uint.TryParse(param[0], out uint gold)) return;
 
-                            if (gold + player.Account.Gold >= uint.MaxValue)
-                                gold = uint.MaxValue - player.Account.Gold;
+                            if ((ulong)gold + player.Info.Gold >= uint.MaxValue)
+                                gold = uint.MaxValue - player.Info.Gold;
 
-                            player.GainGold(gold);
+                            player.GainGold(gold, "npc_script_givegold");
                         }
                         break;
-
                     case ActionType.TakeGold:
                         {
                             if (!uint.TryParse(param[0], out uint gold)) return;
 
-                            if (gold >= player.Account.Gold) gold = player.Account.Gold;
+                            if (gold >= player.Info.Gold) gold = player.Info.Gold;
 
-                            player.Account.Gold -= gold;
-                            player.Enqueue(new S.LoseGold { Gold = gold });
+                            player.SpendGold(gold, "npc_script_takegold");
                         }
                         break;
                     case ActionType.GiveGuildGold:

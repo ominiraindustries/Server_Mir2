@@ -14,6 +14,8 @@ namespace Server.MirObjects
     {
         private long NextTradeTime;
         private long NextGroupInviteTime;
+        private long LastDropItemAction; // throttle timestamp for DropItem
+        private long LastPickUpItemAction; // throttle timestamp for PickUp
 
         public string GMPassword = Settings.GMPassword;
         public bool GMLogin, EnableGroupRecall, EnableGuildInvite, AllowMarriage, AllowLoverRecall, AllowMentor, HasMapShout, HasServerShout; //TODO - Remove        
@@ -553,6 +555,7 @@ namespace Server.MirObjects
                     Enqueue(new S.DuraChanged { UniqueID = item.UniqueID, CurrentDura = item.CurrentDura });
                     RefreshStats();
                     ReceiveChat("You have been given a second chance at life", ChatType.System);
+                    LastPickUpItemAction = Envir.Time;
                     return;
                 }
             }
@@ -1526,7 +1529,7 @@ namespace Server.MirObjects
                 Inventory = new UserItem[Info.Inventory.Length],
                 Equipment = new UserItem[Info.Equipment.Length],
                 QuestInventory = new UserItem[Info.QuestInventory.Length],
-                Gold = Account.Gold,
+                Gold = Info.Gold,
                 Credit = Account.Credit,
                 HasExpandedStorage = Account.ExpandedStorageExpiryDate > Envir.Now ? true : false,
                 ExpandedStorageExpiryTime = Account.ExpandedStorageExpiryDate,
@@ -2904,8 +2907,8 @@ namespace Server.MirObjects
 
                         else if (!uint.TryParse(parts[1], out count)) return;
 
-                        if (count + player.Account.Gold >= uint.MaxValue)
-                            count = uint.MaxValue - player.Account.Gold;
+                        if (count + player.Info.Gold >= uint.MaxValue)
+                            count = uint.MaxValue - player.Info.Gold;
 
                         player.GainGold(count);
                         MessageQueue.Enqueue(string.Format("Player {0} has been given {1} gold", player.Name, count));
@@ -3430,10 +3433,8 @@ namespace Server.MirObjects
                         {
                             int openLevel = (int)((Info.Inventory.Length - 46) / 4);
                             uint openGold = (uint)(1000000 + openLevel * 1000000);
-                            if (Account.Gold >= openGold)
+                            if (SpendGold(openGold, "inventory_expand"))
                             {
-                                Account.Gold -= openGold;
-                                Enqueue(new S.LoseGold { Gold = openGold });
                                 Enqueue(new S.ResizeInventory { Size = Info.ResizeInventory() });
                                 ReceiveChat(GameLanguage.InventoryIncreased, ChatType.System);
                             }
@@ -3450,9 +3451,8 @@ namespace Server.MirObjects
                             TimeSpan addedTime = new TimeSpan(10, 0, 0, 0);
                             uint cost = 1000000;
 
-                            if (Account.Gold >= cost)
+                            if (SpendGold(cost, "storage_expand"))
                             {
-                                Account.Gold -= cost;
                                 Account.HasExpandedStorage = true;
 
                                 if (Account.ExpandedStorageExpiryDate > Envir.Now)
@@ -5093,12 +5093,40 @@ namespace Server.MirObjects
 
             if (temp.Info.Bind.HasFlag(BindMode.DontStore))
             {
+                // Security: blocked attempt to store item with DontStore
+                SecurityLog.Item(
+                    Account?.AccountID,
+                    Info?.Name,
+                    "attempt_store",
+                    temp.UniqueID,
+                    temp.Info.Index,
+                    temp.Count,
+                    "Inventory",
+                    "Storage",
+                    CurrentMap?.Info?.FileName,
+                    CurrentLocation.X,
+                    CurrentLocation.Y,
+                    "blocked_dont_store");
                 Enqueue(p);
                 return;
             }
 
             if (temp.RentalInformation != null && temp.RentalInformation.BindingFlags.HasFlag(BindMode.DontStore))
             {
+                // Security: blocked attempt to store rented item with DontStore
+                SecurityLog.Item(
+                    Account?.AccountID,
+                    Info?.Name,
+                    "attempt_store",
+                    temp.UniqueID,
+                    temp.Info.Index,
+                    temp.Count,
+                    "Inventory",
+                    "Storage",
+                    CurrentMap?.Info?.FileName,
+                    CurrentLocation.X,
+                    CurrentLocation.Y,
+                    "blocked_rental_dont_store");
                 Enqueue(p);
                 return;
             }
@@ -5110,6 +5138,21 @@ namespace Server.MirObjects
                 RefreshBagWeight();
 
                 Report.ItemMoved(temp, MirGridType.Inventory, MirGridType.Storage, from, to);
+
+                // Security: successful store (Inventory -> Storage)
+                SecurityLog.Item(
+                    Account?.AccountID,
+                    Info?.Name,
+                    "store",
+                    temp.UniqueID,
+                    temp.Info.Index,
+                    temp.Count,
+                    "Inventory",
+                    "Storage",
+                    CurrentMap?.Info?.FileName,
+                    CurrentLocation.X,
+                    CurrentLocation.Y,
+                    $"from={from};to={to}");
 
                 p.Success = true;
                 Enqueue(p);
@@ -5167,6 +5210,21 @@ namespace Server.MirObjects
                 Account.Storage[from] = null;
 
                 Report.ItemMoved(temp, MirGridType.Storage, MirGridType.Inventory, from, to);
+
+                // Security: successful takeback (Storage -> Inventory)
+                SecurityLog.Item(
+                    Account?.AccountID,
+                    Info?.Name,
+                    "takeback",
+                    temp.UniqueID,
+                    temp.Info.Index,
+                    temp.Count,
+                    "Storage",
+                    "Inventory",
+                    CurrentMap?.Info?.FileName,
+                    CurrentLocation.X,
+                    CurrentLocation.Y,
+                    $"from={from};to={to}");
 
                 p.Success = true;
                 RefreshBagWeight();
@@ -5308,13 +5366,36 @@ namespace Server.MirObjects
                 if ((toArray[to] != null) && (toArray[to].Cursed) && (UnlockCurse))
                     UnlockCurse = false;
 
-                array[index] = toArray[to];
+                // Swap items between source and destination
+                UserItem removedFromEquip = toArray[to];
+                array[index] = removedFromEquip;
 
                 Report.ItemMoved(temp, toGrid, grid, to, index, "RemoveItem");
 
                 toArray[to] = temp;
 
                 Report.ItemMoved(temp, grid, toGrid, index, to);
+
+                // Security logs: removal and equip
+                try
+                {
+                    string map = CurrentMap?.Info?.FileName;
+                    // If there was an item in equipment, it was removed to the source grid
+                    if (removedFromEquip != null)
+                    {
+                        SecurityLog.Item(Account?.AccountID, Info?.Name, "remove", removedFromEquip.UniqueID, removedFromEquip.Info.Index, removedFromEquip.Count,
+                            toGrid == MirGridType.HeroEquipment ? "hero_equipment" : "equipment",
+                            grid == MirGridType.HeroInventory ? "hero_inventory" : (grid == MirGridType.Storage ? "storage" : "inventory"),
+                            map, CurrentLocation.X, CurrentLocation.Y, null);
+                    }
+
+                    // The item temp was equipped from source grid to equipment
+                    SecurityLog.Item(Account?.AccountID, Info?.Name, "equip", temp.UniqueID, temp.Info.Index, temp.Count,
+                        grid == MirGridType.HeroInventory ? "hero_inventory" : (grid == MirGridType.Storage ? "storage" : "inventory"),
+                        toGrid == MirGridType.HeroEquipment ? "hero_equipment" : "equipment",
+                        map, CurrentLocation.X, CurrentLocation.Y, null);
+                }
+                catch { }
 
                 p.Success = true;
                 Enqueue(p);
@@ -6899,6 +6980,19 @@ namespace Server.MirObjects
                 return;
             }
 
+            // Throttle: avoid rapid repeated drops (anti-dup/abuse)
+            try
+            {
+                if (Envir.Time <= LastDropItemAction + Settings.Security_EconomyMinIntervalMs)
+                {
+                    // Log and deny silently
+                    SecurityLog.Item(Account?.AccountID, Info?.Name, "attempt_drop", id, -1, count, isHeroItem ? "hero_inventory" : "inventory", "ground", CurrentMap?.Info?.FileName, CurrentLocation.X, CurrentLocation.Y, "throttled");
+                    Enqueue(p);
+                    return;
+                }
+            }
+            catch { }
+
             if (CurrentMap.Info.NoThrowItem)
             {
                 ReceiveChat(GameLanguage.CanNotDrop, ChatType.System);
@@ -6961,16 +7055,27 @@ namespace Server.MirObjects
                 return;
             }
 
-            // Additional constraints when dropping directly from equipment
+            // Allow dropping from equipment, handled below (UI/stat refresh occurs on full removal)
+            // Extra safety when origin is equipment
             if (!p.HeroItem && fromEquipment)
             {
                 if (temp.Cursed && !UnlockCurse)
                 {
+                    try
+                    {
+                        SecurityLog.Item(Account?.AccountID, Info?.Name, "attempt_drop", temp.UniqueID, temp.Info.Index, count, "equipment", "ground", CurrentMap?.Info?.FileName, CurrentLocation.X, CurrentLocation.Y, "blocked_cursed");
+                    }
+                    catch { }
                     Enqueue(p);
                     return;
                 }
                 if (temp.WeddingRing != -1)
                 {
+                    try
+                    {
+                        SecurityLog.Item(Account?.AccountID, Info?.Name, "attempt_drop", temp.UniqueID, temp.Info.Index, count, "equipment", "ground", CurrentMap?.Info?.FileName, CurrentLocation.X, CurrentLocation.Y, "blocked_wedding");
+                    }
+                    catch { }
                     Enqueue(p);
                     return;
                 }
@@ -7016,6 +7121,18 @@ namespace Server.MirObjects
             }
             else
             {
+                // Block partial drops from equipment to reduce dup/desync surface
+                if (!p.HeroItem && fromEquipment)
+                {
+                    try
+                    {
+                        string map = CurrentMap?.Info?.FileName;
+                        SecurityLog.Item(Account?.AccountID, Info?.Name, "attempt_drop", temp.UniqueID, temp.Info.Index, count, "equipment", "ground", map, CurrentLocation.X, CurrentLocation.Y, "partial_from_equipment_blocked");
+                    }
+                    catch { }
+                    Enqueue(p);
+                    return;
+                }
                 UserItem temp2 = Envir.CreateFreshItem(temp.Info);
                 temp2.Count = count;
                 if (!temp.Info.Bind.HasFlag(BindMode.DestroyOnDrop))
@@ -7049,6 +7166,9 @@ namespace Server.MirObjects
                 SecurityLog.Item(Account?.AccountID, Info?.Name, "drop", temp.UniqueID, temp.Info.Index, count, src, dst, map, CurrentLocation.X, CurrentLocation.Y);
             }
             catch { }
+
+            // Record last action time
+            LastDropItemAction = Envir.Time;
         }
         public void DropGold(uint gold)
         {
@@ -7057,13 +7177,13 @@ namespace Server.MirObjects
             // Enforce per-action limit (log attempt if capping)
             if (gold > Settings.Security_DropGoldMax)
             {
-                SecurityLog.Economy(Account?.AccountID, Info?.Name, "attempt_drop", requested, Account.Gold, Account.Gold, $"cappedTo={Settings.Security_DropGoldMax}");
+                SecurityLog.Economy(Account?.AccountID, Info?.Name, "attempt_drop", requested, Info.Gold, Info.Gold, $"cappedTo={Settings.Security_DropGoldMax}");
                 gold = Settings.Security_DropGoldMax;
             }
             // Ensure sufficient balance prior to spawning the gold object
-            if (Account.Gold < gold)
+            if (Info.Gold < gold)
             {
-                SecurityLog.Economy(Account?.AccountID, Info?.Name, "attempt_drop_insufficient", requested, Account.Gold, Account.Gold, $"required={gold}");
+                SecurityLog.Economy(Account?.AccountID, Info?.Name, "attempt_drop_insufficient", requested, Info.Gold, Info.Gold, $"required={gold}");
                 return;
             }
 
@@ -7075,6 +7195,16 @@ namespace Server.MirObjects
         }
         public void PickUp()
         {
+            // Throttle: avoid rapid repeated pickups (anti-dup/abuse)
+            try
+            {
+                if (Envir.Time <= LastPickUpItemAction + Settings.Security_EconomyMinIntervalMs)
+                {
+                    SecurityLog.Item(Account?.AccountID, Info?.Name, "attempt_pickup", 0, -1, 0, "ground", "inventory", CurrentMap?.Info?.FileName, CurrentLocation.X, CurrentLocation.Y, "throttled");
+                    return;
+                }
+            }
+            catch { }
             if (Dead)
             {
                 //Send Fail
@@ -7138,12 +7268,15 @@ namespace Server.MirObjects
                 GainGold(item.Gold, "pickup");
                 CurrentMap.RemoveObject(ob);
                 ob.Despawn();
+                LastPickUpItemAction = Envir.Time;
                 return;
             }
 
             if (sendFail)
                 ReceiveChat("Can not pick up, You do not own this item.", ChatType.System);
 
+            // Record last attempt time to avoid hammering
+            LastPickUpItemAction = Envir.Time;
         }
         public void RequestMapInfo(int mapIndex)
         {
@@ -7160,7 +7293,7 @@ namespace Server.MirObjects
                 if (!ob.Info.CanTeleportTo) return;
 
                 uint cost = (uint)Settings.TeleportToNPCCost;
-                if (Account.Gold < cost) return;
+                if (!SpendGold(cost, "teleportToNPC")) return;
 
                 Point p = ob.Front;
                 if (!CurrentMap.ValidPoint(p))
@@ -7174,8 +7307,7 @@ namespace Server.MirObjects
 
                 if (CurrentMap.ValidPoint(p))
                 {
-                    Account.Gold -= cost;
-                    Enqueue(new S.LoseGold { Gold = cost });
+                    // Gold already deducted via SpendGold above.
                     Teleport(CurrentMap, p);
                 }
 
@@ -7217,7 +7349,7 @@ namespace Server.MirObjects
         }
         public override bool CanGainGold(uint gold)
         {
-            return (ulong)gold + Account.Gold <= uint.MaxValue;
+            return (ulong)gold + Info.Gold <= uint.MaxValue;
         }
         public override void WinGold(uint gold)
         {
@@ -7262,13 +7394,13 @@ namespace Server.MirObjects
             if (gold > Settings.Security_MaxGoldPerOp) gold = Settings.Security_MaxGoldPerOp;
 
             // Clamp to avoid overflow
-            if (((ulong)Account.Gold + gold) > uint.MaxValue)
-                gold = uint.MaxValue - Account.Gold;
+            if (((ulong)Info.Gold + gold) > uint.MaxValue)
+                gold = uint.MaxValue - Info.Gold;
 
-            uint before = Account.Gold;
-            Account.Gold += gold;
+            uint before = Info.Gold;
+            Info.Gold += gold;
             Enqueue(new S.GainedGold { Gold = gold });
-            SecurityLog.Economy(Account?.AccountID, Info?.Name, "gain", gold, before, Account.Gold, reason);
+            SecurityLog.Economy(Account?.AccountID, Info?.Name, "gain", gold, before, Info.Gold, reason);
         }
 
         public bool SpendGold(uint gold, string reason)
@@ -7277,12 +7409,12 @@ namespace Server.MirObjects
             // Clamp per-op
             if (gold > Settings.Security_MaxGoldPerOp) gold = Settings.Security_MaxGoldPerOp;
 
-            if (Account.Gold < gold) return false;
+            if (Info.Gold < gold) return false;
 
-            uint before = Account.Gold;
-            Account.Gold -= gold;
+            uint before = Info.Gold;
+            Info.Gold -= gold;
             Enqueue(new S.LoseGold { Gold = gold });
-            SecurityLog.Economy(Account?.AccountID, Info?.Name, "spend", gold, before, Account.Gold, reason);
+            SecurityLog.Economy(Account?.AccountID, Info?.Name, "spend", gold, before, Info.Gold, reason);
             return true;
         }
         public void GainCredit(uint credit)
@@ -7653,7 +7785,7 @@ namespace Server.MirObjects
                     UserItem item = Envir.CreateFreshItem(temp.Info);
                     item.Count = count;
 
-                    if (item.Price() / 2 + Account.Gold > uint.MaxValue)
+                    if (item.Price() / 2 + Info.Gold > uint.MaxValue)
                     {
                         Enqueue(p);
                         return;
@@ -7746,10 +7878,7 @@ namespace Server.MirObjects
                     baseCost = (uint)(temp.RepairPrice() * 3 * script.PriceRate(this, true));
                 }
 
-                if (cost > Account.Gold) return;
-
-                Account.Gold -= cost;
-                Enqueue(new S.LoseGold { Gold = cost });
+                if (!SpendGold(cost, special ? "srepair" : "repair")) return;
                 if (ob.Conq != null) ob.Conq.GuildInfo.GoldStorage += (cost - baseCost);
 
                 if (!special) temp.MaxDura = (ushort)Math.Max(0, temp.MaxDura - (temp.MaxDura - temp.CurrentDura) / 30);
@@ -7800,7 +7929,7 @@ namespace Server.MirObjects
                             return;
                         }
 
-                        if (Account.Gold < Globals.ConsignmentCost)
+                        if (Info.Gold < Globals.ConsignmentCost)
                         {
                             Enqueue(p);
                             return;
@@ -7815,7 +7944,7 @@ namespace Server.MirObjects
                             return;
                         }
 
-                        if (Account.Gold < Globals.AuctionCost)
+                        if (Info.Gold < Globals.AuctionCost)
                         {
                             Enqueue(p);
                             return;
@@ -7871,9 +8000,7 @@ namespace Server.MirObjects
 
                 Info.Inventory[index] = null;
 
-                Account.Gold -= cost;
-
-                Enqueue(new S.LoseGold { Gold = cost });
+                SpendGold(cost, panelType == MarketPanelType.Consign ? "market_consign_fee" : "market_auction_fee");
                 RefreshBagWeight();
             }
 
@@ -8099,7 +8226,7 @@ namespace Server.MirObjects
                             return;
                         }
 
-                        if (auction.Price > Account.Gold || bidPrice > Account.Gold)
+                        if (auction.Price > Info.Gold || bidPrice > Info.Gold)
                         {
                             Enqueue(new S.MarketFail { Reason = 4 });
                             return;
@@ -8109,9 +8236,7 @@ namespace Server.MirObjects
                         {
                             auction.Sold = true;
 
-                            Account.Gold -= auction.Price;
-
-                            Enqueue(new S.LoseGold { Gold = auction.Price });
+                            SpendGold(auction.Price, "market_buy");
                             GainItem(auction.Item);
 
                             Envir.MessageAccount(auction.SellerInfo.AccountInfo, string.Format("You sold {0} for {1:#,##0} Gold", auction.Item.FriendlyName, auction.Price), ChatType.Hint);
@@ -8137,8 +8262,7 @@ namespace Server.MirObjects
                             auction.CurrentBuyerIndex = Info.Index;
                             auction.CurrentBuyerInfo = Info;
 
-                            Account.Gold -= bidPrice;
-                            Enqueue(new S.LoseGold { Gold = bidPrice });
+                            SpendGold(bidPrice, "market_bid");
 
                             Envir.MessageAccount(auction.SellerInfo.AccountInfo, string.Format("Someone has bid {1:#,##0} Gold for {0}", auction.Item.FriendlyName, auction.CurrentBid), ChatType.Hint);
                             Enqueue(new S.MarketSuccess { Message = string.Format("You bid {1:#,##0} Gold for {0}", auction.Item.FriendlyName, auction.CurrentBid) });
@@ -9426,7 +9550,7 @@ namespace Server.MirObjects
 
             if (type == 0)//donate
             {
-                if (Account.Gold < amount)
+                if (Info.Gold < amount)
                 {
                     ReceiveChat("Insufficient gold.", ChatType.System);
                     return;
@@ -9438,9 +9562,8 @@ namespace Server.MirObjects
                     return;
                 }
 
-                Account.Gold -= amount;
+                SpendGold(amount, "guild_donate");
                 MyGuild.Gold += amount;
-                Enqueue(new S.LoseGold { Gold = amount });
                 MyGuild.SendServerPacket(new S.GuildStorageGoldChange() { Type = 0, Name = Info.Name, Amount = amount });
                 MyGuild.NeedSave = true;
             }
@@ -9772,12 +9895,40 @@ namespace Server.MirObjects
 
             if (temp.Info.Bind.HasFlag(BindMode.DontTrade))
             {
+                // Security: blocked attempt to trade item with DontTrade
+                SecurityLog.Item(
+                    Account?.AccountID,
+                    Info?.Name,
+                    "attempt_trade_deposit",
+                    temp.UniqueID,
+                    temp.Info.Index,
+                    temp.Count,
+                    "Inventory",
+                    "Trade",
+                    CurrentMap?.Info?.FileName,
+                    CurrentLocation.X,
+                    CurrentLocation.Y,
+                    "blocked_dont_trade");
                 Enqueue(p);
                 return;
             }
 
             if (temp.RentalInformation != null && temp.RentalInformation.BindingFlags.HasFlag(BindMode.DontTrade))
             {
+                // Security: blocked attempt to trade rented item with DontTrade
+                SecurityLog.Item(
+                    Account?.AccountID,
+                    Info?.Name,
+                    "attempt_trade_deposit",
+                    temp.UniqueID,
+                    temp.Info.Index,
+                    temp.Count,
+                    "Inventory",
+                    "Trade",
+                    CurrentMap?.Info?.FileName,
+                    CurrentLocation.X,
+                    CurrentLocation.Y,
+                    "blocked_rental_dont_trade");
                 Enqueue(p);
                 return;
             }
@@ -9790,6 +9941,21 @@ namespace Server.MirObjects
                 TradeItem();
 
                 Report.ItemMoved(temp, MirGridType.Inventory, MirGridType.Trade, from, to);
+                
+                // Security: successful trade deposit (Inventory -> Trade)
+                SecurityLog.Item(
+                    Account?.AccountID,
+                    Info?.Name,
+                    "trade_deposit",
+                    temp.UniqueID,
+                    temp.Info.Index,
+                    temp.Count,
+                    "Inventory",
+                    "Trade",
+                    CurrentMap?.Info?.FileName,
+                    CurrentLocation.X,
+                    CurrentLocation.Y,
+                    $"from={from};to={to}");
                 
                 p.Success = true;
                 Enqueue(p);
@@ -9832,6 +9998,21 @@ namespace Server.MirObjects
                 TradeItem();
 
                 Report.ItemMoved(temp, MirGridType.Trade, MirGridType.Inventory, from, to);
+
+                // Security: successful trade retrieve (Trade -> Inventory)
+                SecurityLog.Item(
+                    Account?.AccountID,
+                    Info?.Name,
+                    "trade_retrieve",
+                    temp.UniqueID,
+                    temp.Info.Index,
+                    temp.Count,
+                    "Trade",
+                    "Inventory",
+                    CurrentMap?.Info?.FileName,
+                    CurrentLocation.X,
+                    CurrentLocation.Y,
+                    $"from={from};to={to}");
             }
 
             Enqueue(p);
@@ -9967,7 +10148,7 @@ namespace Server.MirObjects
             if (amount < 1) return;
             // Cap amount to configured per-trade maximum
             if (amount > Settings.Security_TradeGoldMax) amount = Settings.Security_TradeGoldMax;
-            if (Account.Gold < amount) return;
+            if (Info.Gold < amount) return;
 
             TradeGoldAmount += amount;
             // Deduct safely and audit
@@ -10947,7 +11128,7 @@ namespace Server.MirObjects
 
             totalGold = gold + parcelCost;
 
-            if (Account.Gold < totalGold || Account.Gold < gold || gold > totalGold)
+            if (Info.Gold < totalGold || Info.Gold < gold || gold > totalGold)
             {
                 Enqueue(new S.MailSent { Result = -1 });
                 return;
@@ -11012,8 +11193,11 @@ namespace Server.MirObjects
 
             if (totalGold > 0)
             {
-                Account.Gold -= totalGold;
-                Enqueue(new S.LoseGold { Gold = totalGold });
+                if (!SpendGold(totalGold, "mail_send"))
+                {
+                    Enqueue(new S.MailSent { Result = -1 });
+                    return;
+                }
             }
 
             //Create parcel
@@ -11072,9 +11256,9 @@ namespace Server.MirObjects
             {
                 uint gold = mail.Gold;
 
-                if (gold + Account.Gold >= uint.MaxValue)
-                    gold = uint.MaxValue - Account.Gold;
-
+                if (gold + Info.Gold >= uint.MaxValue)
+                    gold = uint.MaxValue - Info.Gold;
+                
                 GainGold(gold);
             }
 
@@ -11871,14 +12055,11 @@ namespace Server.MirObjects
             //CHECK GOLD HERE
             uint cost = (uint)((Info.Inventory[index].Info.RequiredAmount * 10) * Settings.RefineCost);
 
-            if (cost > Account.Gold)
+            if (!SpendGold(cost, "refine"))
             {
                 ReceiveChat(String.Format("You don't have enough gold to refine your {0}.", Info.Inventory[index].FriendlyName), ChatType.System);
                 return;
             }
-
-            Account.Gold -= cost;
-            Enqueue(new S.LoseGold { Gold = cost });
 
             //START OF FORMULA
 
@@ -12286,14 +12467,11 @@ namespace Server.MirObjects
 
             uint cost = (uint)((Info.Inventory[index].Info.RequiredAmount * 10) * Settings.ReplaceWedRingCost);
 
-            if (cost > Account.Gold)
+            if (!SpendGold(cost, "replace_wed_ring"))
             {
                 ReceiveChat(String.Format("You don't have enough gold to replace your Wedding Ring."), ChatType.System);
                 return;
             }
-
-            Account.Gold -= cost;
-            Enqueue(new S.LoseGold { Gold = cost });
 
 
             temp.WeddingRing = Info.Married;
@@ -12976,7 +13154,7 @@ namespace Server.MirObjects
                 {
                     //Needs to attempt to pay with gold and credits
                     var totalCost = ((Product.GoldPrice * Quantity) / cost) * (cost - Account.Credit);
-                    if (Account.Gold >= totalCost)
+                    if (Info.Gold >= totalCost)
                     {
                         GoldCost = totalCost;
                         CreditCost = Account.Credit;
@@ -12998,13 +13176,13 @@ namespace Server.MirObjects
             if (canAfford)
             {
                 MessageQueue.EnqueueDebugging(Info.Name + " is trying to buy " + Product.Info.FriendlyName + " x " + Quantity + " - Has enough currency.");
-                Account.Gold -= GoldCost;
+                SpendGold(GoldCost, "gameshop");
                 Account.Credit -= CreditCost;
 
                 Report.GoldChanged(GoldCost, true, Product.Info.FriendlyName);
                 Report.CreditChanged(CreditCost, true, Product.Info.FriendlyName);
 
-                if (GoldCost != 0) Enqueue(new S.LoseGold { Gold = GoldCost });
+                // SpendGold already enqueues LoseGold
                 if (CreditCost != 0) Enqueue(new S.LoseCredit { Credit = CreditCost });
 
                 if (Product.iStock && Product.Stock != 0)
@@ -13252,16 +13430,16 @@ namespace Server.MirObjects
             if ((ulong)amount + ItemRentalFeeAmount >= uint.MaxValue)
                 return;
 
-            if (Account.Gold < amount)
+            if (Info.Gold < amount)
                 return;
 
             if (ItemRentalPartner == null)
                 return;
 
-            ItemRentalFeeAmount += amount;
-            Account.Gold -= amount;
+            if (!SpendGold(amount, "item_rental_fee_set"))
+                return;
 
-            Enqueue(new S.LoseGold { Gold = amount });
+            ItemRentalFeeAmount += amount;
             ItemRentalPartner.Enqueue(new S.ItemRentalFee { Amount = amount });
         }
 
