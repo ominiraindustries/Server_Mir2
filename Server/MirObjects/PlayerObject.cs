@@ -6908,6 +6908,7 @@ namespace Server.MirObjects
 
             UserItem temp = null;
             int index = -1;
+            bool fromEquipment = false;
             HeroObject currentHero = null;
 
             if (!isHeroItem)
@@ -6918,6 +6919,19 @@ namespace Server.MirObjects
                     if (temp == null || temp.UniqueID != id) continue;
                     index = i;
                     break;
+                }
+
+                // If not found in inventory, allow dropping directly from equipment
+                if (index == -1)
+                {
+                    for (int i = 0; i < Info.Equipment.Length; i++)
+                    {
+                        temp = Info.Equipment[i];
+                        if (temp == null || temp.UniqueID != id) continue;
+                        index = i;
+                        fromEquipment = true;
+                        break;
+                    }
                 }
             }
             else
@@ -6947,6 +6961,21 @@ namespace Server.MirObjects
                 return;
             }
 
+            // Additional constraints when dropping directly from equipment
+            if (!p.HeroItem && fromEquipment)
+            {
+                if (temp.Cursed && !UnlockCurse)
+                {
+                    Enqueue(p);
+                    return;
+                }
+                if (temp.WeddingRing != -1)
+                {
+                    Enqueue(p);
+                    return;
+                }
+            }
+
             if (temp.Info.Bind.HasFlag(BindMode.DontDrop))
             {
                 Enqueue(p);
@@ -6970,7 +6999,14 @@ namespace Server.MirObjects
 
                 if (p.HeroItem)
                 {
-                        currentHero.Info.Inventory[index] = null;
+                    currentHero.Info.Inventory[index] = null;
+                }
+                else if (fromEquipment)
+                {
+                    Info.Equipment[index] = null;
+                    Enqueue(new S.DeleteItem { UniqueID = temp.UniqueID, Count = temp.Count });
+                    RefreshStats();
+                    Broadcast(GetUpdateInfo());
                 }
                 else
                 {
@@ -7003,6 +7039,16 @@ namespace Server.MirObjects
                 RefreshBagWeight();
                 Report.ItemChanged(temp, count, 1);
             }  
+
+            // Security log for item drop
+            try
+            {
+                string src = p.HeroItem ? "hero_inventory" : (fromEquipment ? "equipment" : "inventory");
+                string dst = "ground";
+                string map = CurrentMap?.Info?.FileName;
+                SecurityLog.Item(Account?.AccountID, Info?.Name, "drop", temp.UniqueID, temp.Info.Index, count, src, dst, map, CurrentLocation.X, CurrentLocation.Y);
+            }
+            catch { }
         }
         public void DropGold(uint gold)
         {
@@ -7063,6 +7109,21 @@ namespace Server.MirObjects
 
                     GainItem(item.Item);
 
+                    // Security: log item pickup from ground -> inventory
+                    SecurityLog.Item(
+                        Account?.AccountID,
+                        Info?.Name,
+                        "pickup",
+                        item.Item.UniqueID,
+                        item.Item.Info.Index,
+                        item.Item.Count,
+                        "Ground",
+                        "Inventory",
+                        CurrentMap?.Info?.FileName,
+                        CurrentLocation.X,
+                        CurrentLocation.Y,
+                        null);
+
                     Report.ItemChanged(item.Item, item.Item.Count, 2);
 
                     CurrentMap.RemoveObject(ob);
@@ -7073,7 +7134,8 @@ namespace Server.MirObjects
 
                 if (!CanGainGold(item.Gold)) continue;
 
-                GainGold(item.Gold);
+                // Tag gold pickup with reason for economy log
+                GainGold(item.Gold, "pickup");
                 CurrentMap.RemoveObject(ob);
                 ob.Despawn();
                 return;
@@ -10022,13 +10084,29 @@ namespace Server.MirObjects
                         TradePair[p].Info.Trade[i] = null;
 
                         Report.ItemMoved(u, MirGridType.Trade, MirGridType.Inventory, i, -99, string.Format("Trade from {0} to {1}", TradePair[p].Name, TradePair[o].Name));
+
+                        // Security: log item trade commit p -> o (Trade -> Inventory)
+                        SecurityLog.Item(
+                            TradePair[p].Account?.AccountID,
+                            TradePair[p].Info?.Name,
+                            "trade_commit",
+                            u.UniqueID,
+                            u.Info.Index,
+                            u.Count,
+                            "Trade",
+                            "Inventory",
+                            TradePair[o].CurrentMap?.Info?.FileName,
+                            TradePair[o].CurrentLocation.X,
+                            TradePair[o].CurrentLocation.Y,
+                            $"from={TradePair[p].Name};to={TradePair[o].Name}");
                     }
 
                     if (TradePair[p].TradeGoldAmount > 0)
                     {
                         Report.GoldChanged(TradePair[p].TradeGoldAmount, true, string.Format("Trade from {0} to {1}", TradePair[p].Name, TradePair[o].Name));
 
-                        TradePair[o].GainGold(TradePair[p].TradeGoldAmount);
+                        // Tag gold gain on receiver with trade reason (sender already logged spend on deposit)
+                        TradePair[o].GainGold(TradePair[p].TradeGoldAmount, "trade_receive");
                         TradePair[p].TradeGoldAmount = 0;
                     }
 

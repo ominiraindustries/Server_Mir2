@@ -25,6 +25,26 @@ namespace Server.MirEnvir
             Write(line);
         }
 
+        public static void Item(
+            string account,
+            string character,
+            string action,
+            ulong uniqueId,
+            int itemIndex,
+            ushort count,
+            string src,
+            string dst,
+            string map,
+            int x,
+            int y,
+            string meta = null)
+        {
+            if (!Settings.EnableSecurityLogs) return;
+            var line =
+                $"[{DateTime.UtcNow:O}] ITEM account={account ?? "?"} char={character ?? "?"} action={action} uid={uniqueId} index={itemIndex} count={count} src={src} dst={dst} map={map ?? "?"} x={x} y={y} meta={meta ?? string.Empty}";
+            Write(line);
+        }
+
         public static void Notice(string category, string message)
         {
             if (!Settings.EnableSecurityLogs) return;
