@@ -1,0 +1,35 @@
+# .NET / Visual Studio
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build artifacts (custom output path)
+Build/
+
+# Logs / temp
+logs/
+*.log
+[Tt]est[Rr]esult*/
+*.ide/
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# NuGet
+packages/
+*.nupkg
+.nuget/
+
+# Rider / VS Code
+.idea/
+.vscode/
+
+# Do NOT ignore third-party runtime dependencies under Components/
+# Keep Components/* tracked because it contains required DLLs.
+

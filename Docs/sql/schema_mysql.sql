@@ -1,0 +1,150 @@
+-- Schema MySQL para Crystal Mir2
+-- Motor y charset recomendados
+CREATE DATABASE IF NOT EXISTS crystal_mir2
+  DEFAULT CHARACTER SET utf8mb4
+  DEFAULT COLLATE utf8mb4_unicode_ci;
+USE crystal_mir2;
+
+-- Asegurar SQL mode seguro
+SET sql_mode = 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+
+-- Tabla: Accounts
+CREATE TABLE IF NOT EXISTS Accounts (
+  Id INT NOT NULL AUTO_INCREMENT,
+  AccountID VARCHAR(50) NOT NULL,
+  PasswordHash VARCHAR(255) NOT NULL,
+  Salt VARBINARY(64) NOT NULL,
+  RequirePasswordChange TINYINT(1) NOT NULL DEFAULT 0,
+  UserName VARCHAR(50) NOT NULL,
+  BirthDate DATETIME NULL,
+  SecretQuestion VARCHAR(100) NULL,
+  SecretAnswer VARCHAR(100) NULL,
+  Email VARCHAR(100) NULL,
+  CreationIP VARCHAR(45) NOT NULL,
+  CreationDate DATETIME NOT NULL,
+  Banned TINYINT(1) NOT NULL DEFAULT 0,
+  BanReason VARCHAR(200) NULL,
+  ExpiryDate DATETIME NULL,
+  LastIP VARCHAR(45) NULL,
+  LastDate DATETIME NULL,
+  HasExpandedStorage TINYINT(1) NOT NULL DEFAULT 0,
+  ExpandedStorageExpiryDate DATETIME NULL,
+  Gold INT UNSIGNED NOT NULL DEFAULT 0,
+  Credit INT UNSIGNED NOT NULL DEFAULT 0,
+  AdminAccount TINYINT(1) NOT NULL DEFAULT 0,
+  WrongPasswordCount INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (Id),
+  UNIQUE KEY UX_Accounts_AccountID (AccountID),
+  KEY IX_Accounts_LastDate (LastDate)
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC;
+
+-- Tabla: Characters
+CREATE TABLE IF NOT EXISTS Characters (
+  Id INT NOT NULL AUTO_INCREMENT,
+  AccountId INT NOT NULL,
+  Name VARCHAR(50) NOT NULL,
+  Level INT NOT NULL,
+  Class TINYINT NOT NULL,
+  Gender TINYINT NOT NULL,
+  Hair TINYINT NOT NULL,
+  CreationIP VARCHAR(45) NOT NULL,
+  CreationDate DATETIME NOT NULL,
+  Banned TINYINT(1) NOT NULL DEFAULT 0,
+  BanReason VARCHAR(200) NULL,
+  ExpiryDate DATETIME NULL,
+  LastIP VARCHAR(45) NULL,
+  LastLogoutDate DATETIME NULL,
+  LastLoginDate DATETIME NULL,
+  Deleted TINYINT(1) NOT NULL DEFAULT 0,
+  DeleteDate DATETIME NULL,
+  CurrentMapIndex INT NOT NULL,
+  CurrentX INT NOT NULL,
+  CurrentY INT NOT NULL,
+  Direction TINYINT NOT NULL,
+  BindMapIndex INT NOT NULL,
+  BindX INT NOT NULL,
+  BindY INT NOT NULL,
+  HP INT NOT NULL,
+  MP INT NOT NULL,
+  Experience BIGINT NOT NULL,
+  PKPoints INT NOT NULL DEFAULT 0,
+  AttackMode TINYINT NOT NULL,
+  PetMode TINYINT NOT NULL,
+  MentalState TINYINT NOT NULL,
+  MentalStateLvl TINYINT NOT NULL,
+  AllowGroup TINYINT(1) NOT NULL DEFAULT 1,
+  AllowTrade TINYINT(1) NOT NULL DEFAULT 1,
+  AllowObserve TINYINT(1) NOT NULL DEFAULT 1,
+  PRIMARY KEY (Id),
+  UNIQUE KEY UX_Characters_Name (Name),
+  KEY IX_Characters_AccountId (AccountId),
+  CONSTRAINT FK_Characters_Accounts FOREIGN KEY (AccountId) REFERENCES Accounts (Id)
+    ON UPDATE RESTRICT ON DELETE CASCADE
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC;
+
+-- Tabla: StorageItems (inventario de cuenta por slot)
+CREATE TABLE IF NOT EXISTS StorageItems (
+  Id INT NOT NULL AUTO_INCREMENT,
+  AccountId INT NOT NULL,
+  Slot INT NOT NULL,
+  ItemData LONGBLOB NOT NULL,
+  PRIMARY KEY (Id),
+  UNIQUE KEY UX_StorageItems_Account_Slot (AccountId, Slot),
+  KEY IX_StorageItems_AccountId (AccountId),
+  CONSTRAINT FK_StorageItems_Accounts FOREIGN KEY (AccountId) REFERENCES Accounts (Id)
+    ON UPDATE RESTRICT ON DELETE CASCADE
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC;
+
+-- Tabla: Auctions
+CREATE TABLE IF NOT EXISTS Auctions (
+  Id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  AuctionID BIGINT UNSIGNED NOT NULL,
+  SellerCharacterId INT NOT NULL,
+  ItemData LONGBLOB NOT NULL,
+  ConsignmentDate DATETIME NOT NULL,
+  Price INT UNSIGNED NOT NULL,
+  ItemType TINYINT NOT NULL,
+  CurrentBid INT UNSIGNED NULL,
+  CurrentBuyerCharacterId INT NULL,
+  Expired TINYINT(1) NOT NULL DEFAULT 0,
+  Sold TINYINT(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (Id),
+  UNIQUE KEY UX_Auctions_AuctionID (AuctionID),
+  KEY IX_Auctions_SellerCharacterId (SellerCharacterId),
+  KEY IX_Auctions_ConsignmentDate (ConsignmentDate),
+  CONSTRAINT FK_Auctions_SellerCharacter FOREIGN KEY (SellerCharacterId) REFERENCES Characters (Id)
+    ON UPDATE RESTRICT ON DELETE CASCADE,
+  CONSTRAINT FK_Auctions_BuyerCharacter FOREIGN KEY (CurrentBuyerCharacterId) REFERENCES Characters (Id)
+    ON UPDATE RESTRICT ON DELETE SET NULL
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC;
+
+-- Tabla: Mail
+CREATE TABLE IF NOT EXISTS Mail (
+  MailID BIGINT UNSIGNED NOT NULL,
+  Sender VARCHAR(50) NOT NULL,
+  RecipientCharacterId INT NOT NULL,
+  Message TEXT NOT NULL,
+  Gold INT UNSIGNED NOT NULL DEFAULT 0,
+  DateSent DATETIME NOT NULL,
+  DateOpened DATETIME NULL,
+  Locked TINYINT(1) NOT NULL DEFAULT 0,
+  Collected TINYINT(1) NOT NULL DEFAULT 0,
+  CanReply TINYINT(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (MailID),
+  KEY IX_Mail_Recipient (RecipientCharacterId),
+  CONSTRAINT FK_Mail_Recipient FOREIGN KEY (RecipientCharacterId) REFERENCES Characters (Id)
+    ON UPDATE RESTRICT ON DELETE CASCADE
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC;
+
+-- Tabla: MailItems (adjuntos del correo)
+CREATE TABLE IF NOT EXISTS MailItems (
+  Id INT NOT NULL AUTO_INCREMENT,
+  MailID BIGINT UNSIGNED NOT NULL,
+  Ordinal INT NOT NULL,
+  ItemData LONGBLOB NOT NULL,
+  PRIMARY KEY (Id),
+  UNIQUE KEY UX_MailItems_MailID_Ordinal (MailID, Ordinal),
+  KEY IX_MailItems_MailID (MailID),
+  CONSTRAINT FK_MailItems_Mail FOREIGN KEY (MailID) REFERENCES Mail (MailID)
+    ON UPDATE RESTRICT ON DELETE CASCADE
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC;
