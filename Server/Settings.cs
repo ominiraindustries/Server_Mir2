@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using Server.MirDatabase;
 using Server.MirObjects;
 
@@ -44,6 +44,23 @@ namespace Server
         public static bool EnforceDBChecks = true;
 
         public static bool MonsterProcessWhenAlone = false;
+
+        // Performance (flags opt-in)
+        public static bool ThrottleEmptyMaps = false;            // If true, process empty maps less frequently
+        public static int EmptyMapIntervalMs = 5000;             // Interval to process empty maps when throttling
+        public static bool SkipRespawnOnEmptyMap = false;         // If true, skip respawn calculations on empty maps
+        public static string[] AlwaysActiveMaps = new string[0];  // Maps always processed regardless of emptiness
+        // Precomputed lookups (built from AlwaysActiveMaps at load time)
+        public static HashSet<string> AlwaysActiveMapNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public static HashSet<int> AlwaysActiveMapIndices = new HashSet<int>();
+
+        // Metrics (logging only)
+        public static bool EnablePerfMetricsLogging = false;      // If true, emit periodic performance metrics
+        public static int PerfLogIntervalSeconds = 30;            // Interval for aggregated perf logs
+
+        // Idle CPU reduction (opt-in)
+        public static bool EnableIdleSleep = false;               // If true, sleep briefly when idle
+        public static int IdleSleepMs = 1;                        // Sleep duration in milliseconds when idle
 
         public static string DefaultNPCFilename = "00Default";
         public static string MonsterNPCFilename = "00Monster";
@@ -369,6 +386,40 @@ namespace Server
             GameMasterEffect = Reader.ReadBoolean("Optional", "GameMasterEffect", GameMasterEffect);
             LineMessageTimer = Reader.ReadInt32("Optional", "LineMessageTimer", LineMessageTimer);
 
+            // Performance (opt-in flags)
+            ThrottleEmptyMaps = Reader.ReadBoolean("Performance", "ThrottleEmptyMaps", ThrottleEmptyMaps);
+            EmptyMapIntervalMs = Reader.ReadInt32("Performance", "EmptyMapIntervalMs", EmptyMapIntervalMs);
+            SkipRespawnOnEmptyMap = Reader.ReadBoolean("Performance", "SkipRespawnOnEmptyMap", SkipRespawnOnEmptyMap);
+            var perfAlwaysActiveMaps = Reader.ReadString("Performance", "AlwaysActiveMaps", string.Empty);
+            if (!string.IsNullOrWhiteSpace(perfAlwaysActiveMaps))
+            {
+                AlwaysActiveMaps = perfAlwaysActiveMaps.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                for (int i = 0; i < AlwaysActiveMaps.Length; i++) AlwaysActiveMaps[i] = AlwaysActiveMaps[i].Trim();
+            }
+            else
+            {
+                AlwaysActiveMaps = new string[0];
+            }
+
+            // Build fast lookups for AlwaysActiveMaps
+            AlwaysActiveMapNames.Clear();
+            AlwaysActiveMapIndices.Clear();
+            for (int i = 0; i < AlwaysActiveMaps.Length; i++)
+            {
+                var token = AlwaysActiveMaps[i];
+                if (string.IsNullOrWhiteSpace(token)) continue;
+                if (int.TryParse(token, out int idx)) AlwaysActiveMapIndices.Add(idx);
+                else AlwaysActiveMapNames.Add(token);
+            }
+
+            // Metrics (logging only)
+            EnablePerfMetricsLogging = Reader.ReadBoolean("Performance", "EnablePerfMetricsLogging", EnablePerfMetricsLogging);
+            PerfLogIntervalSeconds = Reader.ReadInt32("Performance", "PerfLogIntervalSeconds", PerfLogIntervalSeconds);
+
+            // Idle
+            EnableIdleSleep = Reader.ReadBoolean("Performance", "EnableIdleSleep", EnableIdleSleep);
+            IdleSleepMs = Reader.ReadInt32("Performance", "IdleSleepMs", IdleSleepMs);
+
             //Database
             SaveDelay = Reader.ReadInt32("Database", "SaveDelay", SaveDelay);
             CredxGold = Reader.ReadInt16("Database", "CredxGold", CredxGold);
@@ -631,6 +682,16 @@ namespace Server
             Reader.Write("Optional", "ExpMobLevelDifference", ExpMobLevelDifference);
             Reader.Write("Optional", "GameMasterEffect", GameMasterEffect);
             Reader.Write("Optional", "LineMessageTimer", LineMessageTimer);
+
+            // Performance (opt-in flags)
+            Reader.Write("Performance", "ThrottleEmptyMaps", ThrottleEmptyMaps);
+            Reader.Write("Performance", "EmptyMapIntervalMs", EmptyMapIntervalMs);
+            Reader.Write("Performance", "SkipRespawnOnEmptyMap", SkipRespawnOnEmptyMap);
+            Reader.Write("Performance", "AlwaysActiveMaps", string.Join(",", AlwaysActiveMaps ?? Array.Empty<string>()));
+            Reader.Write("Performance", "EnablePerfMetricsLogging", EnablePerfMetricsLogging);
+            Reader.Write("Performance", "PerfLogIntervalSeconds", PerfLogIntervalSeconds);
+            Reader.Write("Performance", "EnableIdleSleep", EnableIdleSleep);
+            Reader.Write("Performance", "IdleSleepMs", IdleSleepMs);
 
             //Database
             Reader.Write("Database", "SaveDelay", SaveDelay);

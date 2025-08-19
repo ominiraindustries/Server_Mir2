@@ -72,6 +72,15 @@ namespace Server.MirEnvir
         public long Time { get; private set; }
         public RespawnTimer RespawnTick = new RespawnTimer();
 
+        // Perf metrics accumulators (reset on each log interval)
+        public long Perf_LastLogTime = 0;
+        public long Perf_Ticks = 0;
+        public long Perf_TickElapsedSumMs = 0;
+        public long Perf_TickElapsedMaxMs = 0;
+        public long Perf_MapsProcessed = 0;
+        public long Perf_RespawnChecksEvaluated = 0;
+        public long Perf_RespawnChecksSkipped = 0;
+
         private static List<string> DisabledCharNames = new List<string>();
         private static List<string> LineMessages = new List<string>();
 
@@ -82,6 +91,24 @@ namespace Server.MirEnvir
 
         public bool Running { get; private set; }
 
+        public bool IsMapEmptyAndNotAlwaysActive(Map map)
+        {
+            if (map == null || map.Info == null) return true;
+            if (!map.IsEmpty()) return false;
+
+            // Fast O(1) checks using precomputed HashSets
+            if (Settings.AlwaysActiveMapIndices != null && Settings.AlwaysActiveMapIndices.Count > 0)
+            {
+                if (Settings.AlwaysActiveMapIndices.Contains(map.Info.Index)) return false;
+            }
+            if (Settings.AlwaysActiveMapNames != null && Settings.AlwaysActiveMapNames.Count > 0)
+            {
+                if (!string.IsNullOrEmpty(map.Info.Title) && Settings.AlwaysActiveMapNames.Contains(map.Info.Title)) return false;
+                if (!string.IsNullOrEmpty(map.Info.FileName) && Settings.AlwaysActiveMapNames.Contains(map.Info.FileName)) return false;
+            }
+
+            return true;
+        }
 
         private static uint _objectID;
         public uint ObjectID => ++_objectID;
@@ -149,8 +176,8 @@ namespace Server.MirEnvir
 
         //multithread vars
         readonly object _locker = new object();
-        public MobThread[] MobThreads = new MobThread[Settings.ThreadLimit];
-        private readonly Thread[] MobThreading = new Thread[Settings.ThreadLimit];
+        public MobThread[] MobThreads; // sized at runtime from Settings.ThreadLimit
+        private Thread[] MobThreading; // sized at runtime from Settings.ThreadLimit
         public int SpawnMultiplier = 1;//set this to 2 if you want double spawns (warning this can easily lag your server far beyond what you imagine)
 
         public List<string> CustomCommands = new List<string>();
@@ -178,6 +205,15 @@ namespace Server.MirEnvir
             PasswordReg = new Regex(@"^[A-Za-z0-9]{" + Globals.MinPasswordLength + "," + Globals.MaxPasswordLength + "}$");
             EMailReg = new Regex(@"\w+([-+.]\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*");
             CharacterReg = new Regex(@"^[\u4e00-\u9fa5_A-Za-z0-9]{" + Globals.MinCharacterNameLength + "," + Globals.MaxCharacterNameLength + "}$");
+        }
+
+        private void EnsureThreadArraysSized()
+        {
+            var limit = Math.Max(1, Settings.ThreadLimit);
+            if (MobThreads == null || MobThreads.Length != limit)
+                MobThreads = new MobThread[limit];
+            if (MobThreading == null || MobThreading.Length != limit)
+                MobThreading = new Thread[limit];
         }
 
         public static int LastCount = 0, LastRealCount = 0;
@@ -493,6 +529,7 @@ namespace Server.MirEnvir
 
                 if (Settings.Multithreaded)
                 {
+                    EnsureThreadArraysSized();
                     for (var j = 0; j < MobThreads.Length; j++)
                     {
                         MobThreads[j] = new MobThread();
@@ -513,6 +550,7 @@ namespace Server.MirEnvir
 
                 if (Settings.Multithreaded)
                 {
+                    EnsureThreadArraysSized();
                     for (var j = 0; j < MobThreads.Length; j++)
                     {
                         var Info = MobThreads[j];
@@ -596,6 +634,8 @@ namespace Server.MirEnvir
 
                         var TheEnd = false;
                         var Start = Stopwatch.ElapsedMilliseconds;
+                        // perf: start tick timer
+                        long perfTickStart = Stopwatch.ElapsedMilliseconds;
                         while (!TheEnd && Stopwatch.ElapsedMilliseconds - Start < 20)
                         {
                             if (current == null)
@@ -617,8 +657,24 @@ namespace Server.MirEnvir
                             current = next;
                         }
 
+                        int mapsProcessedThisTick = 0;
                         for (var i = 0; i < MapList.Count; i++)
-                            MapList[i].Process();
+                        {
+                            var map = MapList[i];
+                            if (Settings.ThrottleEmptyMaps && IsMapEmptyAndNotAlwaysActive(map))
+                            {
+                                // skip processing if throttled and interval not passed
+                                if (Time < map.LastProcessedTime + Settings.EmptyMapIntervalMs)
+                                    continue;
+                            }
+
+                            map.Process();
+                            map.LastProcessedTime = Time;
+                            mapsProcessedThisTick++;
+                        }
+
+                        if (Settings.EnablePerfMetricsLogging)
+                            Perf_MapsProcessed += mapsProcessedThisTick;
 
                         DragonSystem?.Process();
 
@@ -653,7 +709,42 @@ namespace Server.MirEnvir
                             });
                         }
 
-                        //   if (Players.Count == 0) Thread.Sleep(1);
+                        // perf: end tick timer and maybe log
+                        if (Settings.EnablePerfMetricsLogging)
+                        {
+                            long perfElapsed = Stopwatch.ElapsedMilliseconds - perfTickStart;
+                            Perf_Ticks++;
+                            Perf_TickElapsedSumMs += perfElapsed;
+                            if (perfElapsed > Perf_TickElapsedMaxMs) Perf_TickElapsedMaxMs = perfElapsed;
+
+                            long intervalMs = Math.Max(1000, Settings.PerfLogIntervalSeconds * 1000);
+                            if (Time >= Perf_LastLogTime + intervalMs)
+                            {
+                                double avgTick = Perf_Ticks > 0 ? (double)Perf_TickElapsedSumMs / Perf_Ticks : 0;
+                                var perfMsg = $"PERF: ticks={Perf_Ticks}, avgTickMs={avgTick:F2}, maxTickMs={Perf_TickElapsedMaxMs}, mapsProcessed={Perf_MapsProcessed}, respawnEval={Perf_RespawnChecksEvaluated}, respawnSkip={Perf_RespawnChecksSkipped}";
+                                Server.Logger.GetLogger(Server.LogType.Server).Info(perfMsg);
+                                MessageQueue.Enqueue(perfMsg);
+
+                                // reset window
+                                Perf_LastLogTime = Time;
+                                Perf_Ticks = 0;
+                                Perf_TickElapsedSumMs = 0;
+                                Perf_TickElapsedMaxMs = 0;
+                                Perf_MapsProcessed = 0;
+                                Perf_RespawnChecksEvaluated = 0;
+                                Perf_RespawnChecksSkipped = 0;
+                            }
+                        }
+
+                        // Optional idle sleep to cut CPU when idle
+                        if (Settings.EnableIdleSleep && Settings.IdleSleepMs > 0)
+                        {
+                            // If no players online, or we did almost nothing this tick, yield CPU briefly
+                            if (Players.Count == 0 || (mapsProcessedThisTick == 0 && processCount == 0))
+                            {
+                                Thread.Sleep(Settings.IdleSleepMs);
+                            }
+                        }
                         //   GC.Collect();
                     }
                 }

@@ -1,22 +1,26 @@
 param(
   [ValidateSet('Debug','Release')]
   [string]$Configuration = 'Release',
-  [switch]$Clean
+  [switch]$Clean,
+  [string]$Version
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-Write-Host "== Crystal Mir2 build (config: $Configuration) ==" -ForegroundColor Cyan
+if ($Version) { Write-Host "== Crystal Mir2 build (config: $Configuration, version: $Version) ==" -ForegroundColor Cyan }
+else { Write-Host "== Crystal Mir2 build (config: $Configuration) ==" -ForegroundColor Cyan }
 
 function Build-Project($projPath) {
   Write-Host "-- Restoring: $projPath" -ForegroundColor Yellow
-  dotnet restore $projPath | Out-Host
+  if ($Version) { dotnet restore $projPath -p:Version=$Version | Out-Host }
+  else { dotnet restore $projPath | Out-Host }
   if ($Clean) {
     Write-Host "-- Cleaning:  $projPath" -ForegroundColor Yellow
     dotnet clean $projPath -c $Configuration | Out-Host
   }
   Write-Host "-- Building:  $projPath" -ForegroundColor Yellow
-  dotnet build $projPath -c $Configuration --nologo | Out-Host
+  if ($Version) { dotnet build $projPath -c $Configuration --nologo -p:Version=$Version | Out-Host }
+  else { dotnet build $projPath -c $Configuration --nologo | Out-Host }
 }
 
 # Paths

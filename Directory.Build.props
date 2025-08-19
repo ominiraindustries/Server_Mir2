@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <!-- Default version if none provided via -p:Version= -->
+    <Version Condition="'$(Version)'==''">0.1.0</Version>
+    <!-- Apply the Version to assembly metadata -->
+    <AssemblyVersion>$(Version)</AssemblyVersion>
+    <FileVersion>$(Version)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+  </PropertyGroup>
+</Project>

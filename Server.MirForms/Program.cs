@@ -1,4 +1,7 @@
-﻿namespace Server.MirForms
+using System;
+using System.IO;
+
+namespace Server.MirForms
 {
     static class Program
     {
@@ -10,7 +13,19 @@
         {
             Packet.IsServer = true;
 
-            log4net.Config.XmlConfigurator.Configure();
+            // Ensure log directory exists and load log4net from local config if present (fallback: default config)
+            try
+            {
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                Directory.CreateDirectory(Path.Combine(baseDir, "Logs"));
+                var cfgPath = Path.Combine(baseDir, "log4net.config");
+                var fi = new FileInfo(cfgPath);
+                if (fi.Exists)
+                    log4net.Config.XmlConfigurator.Configure(fi);
+                else
+                    log4net.Config.XmlConfigurator.Configure();
+            }
+            catch { /* ignore logging config errors */ }
 
             try
             {

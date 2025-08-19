@@ -129,3 +129,24 @@ Fecha: 2025-08-19 09:03
 - Activación por regiones y streaming de contenido.
 - Persistencia de estado “simulado” de monstruos para grandes poblaciones off-screen.
 - Ajuste fino por tipo de mapa/instancia (ciudades, dungeons, eventos).
+
+## Checklist de implementación (fase 1, seguro)
+
+- [ ] Añadir flags en `Server/Settings.cs` (por defecto OFF):
+  - `ThrottleEmptyMaps`, `EmptyMapIntervalMs`, `SkipRespawnOnEmptyMap`, `AlwaysActiveMaps`.
+- [ ] Instrumentación básica (solo contadores y tiempos, sin cambiar lógica):
+  - `MapsProcessedPerTick`, `RespawnChecksEvaluated/Skipped`, `MonsterAIProcessed` (opcional), `TickElapsedMs`.
+- [ ] Gating mínimo:
+  - Throttle de `Map.Process()` cuando `Players.Count == 0` respetando `AlwaysActiveMaps` y `EmptyMapIntervalMs`.
+  - Early-return en `ProcessRespawns()` con `SkipRespawnOnEmptyMap` y mapa vacío.
+- [ ] Logs con muestreo (debug/trace) cada N segundos.
+- [ ] Validación manual en entorno de pruebas con 0–2 jugadores.
+- [ ] Rollback inmediato: desactivar flags y reiniciar.
+
+## Plan de métricas y benchmark
+
+- Escenarios:
+  - 0 jugadores (5 min), 1 jugador en ciudad (5 min), 3–5 jugadores en combate (10 min).
+- Baseline: todas las flags OFF. Registrar `TickElapsedMs` promedio y p95, `MapsProcessedPerTick`, `RespawnChecks*`, CPU y memoria.
+- Comparativa: activar solo una flag a la vez y repetir guion. Documentar resultados.
+- Herramientas: `Stopwatch` en `Envir`, logs agregados cada `PerfLogIntervalSeconds`. Opcional `dotnet-counters` o Monitor de recursos de Windows.

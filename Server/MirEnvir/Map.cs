@@ -39,6 +39,15 @@ namespace Server.MirEnvir
         public List<ConquestObject> Conquest = new List<ConquestObject>();
         public ConquestObject tempConquest;
 
+        // Last time this map executed Process() (used for throttling empty maps)
+        public long LastProcessedTime = 0;
+
+        public bool IsEmpty()
+        {
+            // Consider map empty if there are no players or heroes present
+            return Players.Count == 0 && Heroes.Count == 0;
+        }
+
         public Map(MapInfo info)
         {
             Info = info;
@@ -736,6 +745,18 @@ namespace Server.MirEnvir
 
         private void ProcessRespawns()
         {
+            // Performance gating: optionally skip respawn checks on empty maps
+            if (Settings.SkipRespawnOnEmptyMap && Envir.IsMapEmptyAndNotAlwaysActive(this))
+            {
+                // Count all potential checks as skipped for metrics
+                if (Settings.EnablePerfMetricsLogging)
+                    Envir.Perf_RespawnChecksSkipped += Respawns.Count;
+                return;
+            }
+
+            if (Settings.EnablePerfMetricsLogging)
+                Envir.Perf_RespawnChecksEvaluated += Respawns.Count;
+
             bool Success = true;
             for (int i = 0; i < Respawns.Count; i++)
             {

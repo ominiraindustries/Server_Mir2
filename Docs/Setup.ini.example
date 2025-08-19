@@ -1,0 +1,24 @@
+; Ejemplo de configuración para flags de rendimiento
+; Copia esta sección en Configs/Setup.ini o renombra este archivo a Configs/Setup.ini
+
+[Performance]
+; Procesar mapas vacíos con menos frecuencia (false por defecto)
+ThrottleEmptyMaps=false
+
+; Intervalo en ms para procesar mapas vacíos cuando ThrottleEmptyMaps=true
+EmptyMapIntervalMs=5000
+
+; Saltar cálculos de respawn en mapas vacíos (false por defecto)
+SkipRespawnOnEmptyMap=false
+
+; Lista separada por comas de mapas que siempre se procesan (por nombre o ID), ej: 0,1,city_zhou
+AlwaysActiveMaps=
+
+; Logs de métricas (solo lectura/diagnóstico)
+EnablePerfMetricsLogging=false
+PerfLogIntervalSeconds=30
+
+; Reducir CPU en reposo (opcional)
+; Si no hay jugadores online o el tick no procesó nada, duerme el hilo brevemente
+EnableIdleSleep=false
+IdleSleepMs=1
