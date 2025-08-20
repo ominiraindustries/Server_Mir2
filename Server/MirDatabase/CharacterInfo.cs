@@ -570,8 +570,13 @@ namespace Server.MirDatabase
             }
 
             writer.Write(MaximumHeroCount);
-            for (int i = 0; i < Heroes.Length; i++)
-                writer.Write(Heroes[i] != null ? Heroes[i].Index : 0);            
+            for (int i = 0; i < MaximumHeroCount; i++)
+            {
+                int heroIndex = 0;
+                if (Heroes != null && i < Heroes.Length && Heroes[i] != null)
+                    heroIndex = Heroes[i].Index;
+                writer.Write(heroIndex);
+            }
             writer.Write(CurrentHeroIndex);
             writer.Write(HeroSpawned);
             writer.Write((byte)HeroBehaviour);

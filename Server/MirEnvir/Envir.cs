@@ -1109,6 +1109,7 @@ namespace Server.MirEnvir
 
                 // Persist to MariaDB as source of truth
                 SaveAccountsToMariaDB();
+                SaveCharactersToMariaDB();
             }
             catch (Exception ex)
             {
@@ -1330,6 +1331,7 @@ namespace Server.MirEnvir
                 SaveAccounts(mStream);
                 // Persist to MariaDB as source of truth (before async file flush)
                 SaveAccountsToMariaDB();
+                SaveCharactersToMariaDB();
                 var fStream = new FileStream(AccountPath + "n", FileMode.Create);
 
                 var data = mStream.ToArray();
@@ -1379,6 +1381,118 @@ namespace Server.MirEnvir
             catch (Exception ex)
             {
                 MessageQueue.Enqueue($"MariaDB account save failed: {ex.Message}");
+            }
+        }
+
+        private void SaveCharactersToMariaDB()
+        {
+            try
+            {
+                if (!Settings.UseMariaDBForAccounts) return; // reuse same flag for now
+                var repo = new CharacterRepository(
+                    Settings.MariaDB_Host,
+                    Settings.MariaDB_Port,
+                    Settings.MariaDB_Database,
+                    Settings.MariaDB_User,
+                    Settings.MariaDB_Password,
+                    Settings.MariaDB_SslRequired);
+
+                // Ensure new characters have a valid DB Id before saving items (FK requires it)
+                for (int i = 0; i < AccountList.Count; i++)
+                {
+                    var acc = AccountList[i];
+                    for (int j = 0; j < acc.Characters.Count; j++)
+                    {
+                        var ch = acc.Characters[j];
+                        if (ch != null && ch.Index <= 0)
+                        {
+                            try
+                            {
+                                var newId = repo.CreateCharacter(acc.Index, ch);
+                                ch.Index = newId;
+                                MessageQueue.Enqueue($"Inserted new character '{ch.Name}' with Id={newId} for AccountId={acc.Index}");
+                            }
+                            catch (Exception exCreate)
+                            {
+                                MessageQueue.Enqueue($"MariaDB character insert failed for '{ch?.Name}': {exCreate.Message}");
+                            }
+                        }
+                    }
+                }
+
+                var batch = new List<(int AccountId, CharacterInfo Ch)>();
+                for (int i = 0; i < AccountList.Count; i++)
+                {
+                    var acc = AccountList[i];
+                    var accId = acc.Index; // DB Id
+                    for (int j = 0; j < acc.Characters.Count; j++)
+                    {
+                        batch.Add((accId, acc.Characters[j]));
+                    }
+                }
+
+                if (batch.Count > 0)
+                    repo.UpsertCharacters(batch);
+
+                // Refresh character DB Ids to avoid saving items under stale/zero Ids
+                try
+                {
+                    for (int i = 0; i < AccountList.Count; i++)
+                    {
+                        var acc = AccountList[i];
+                        var freshList = repo.LoadCharactersByAccount(acc.Index);
+                        var byName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                        for (int k = 0; k < freshList.Count; k++)
+                            byName[freshList[k].Name ?? string.Empty] = freshList[k].Index;
+
+                        for (int j = 0; j < acc.Characters.Count; j++)
+                        {
+                            var ch = acc.Characters[j];
+                            if (ch != null && ch.Name != null && byName.TryGetValue(ch.Name, out var dbId))
+                                ch.Index = dbId;
+                        }
+                    }
+                }
+                catch (Exception exRefresh)
+                {
+                    MessageQueue.Enqueue($"MariaDB character ID refresh failed: {exRefresh.Message}");
+                }
+
+                // Save character items (Inventory/Equipment/QuestInventory)
+                try
+                {
+                    var itemRepo = new CharacterItemRepository(
+                        Settings.MariaDB_Host,
+                        Settings.MariaDB_Port,
+                        Settings.MariaDB_Database,
+                        Settings.MariaDB_User,
+                        Settings.MariaDB_Password,
+                        Settings.MariaDB_SslRequired);
+
+                    for (int i = 0; i < AccountList.Count; i++)
+                    {
+                        var acc = AccountList[i];
+                        for (int j = 0; j < acc.Characters.Count; j++)
+                        {
+                            var ch = acc.Characters[j];
+                            // Minimal diagnostics to confirm save path and counts
+                            int cInv = 0, cEq = 0, cQuest = 0;
+                            if (ch.Inventory != null) { for (int ii = 0; ii < ch.Inventory.Length; ii++) if (ch.Inventory[ii] != null) cInv++; }
+                            if (ch.Equipment != null) { for (int ii = 0; ii < ch.Equipment.Length; ii++) if (ch.Equipment[ii] != null) cEq++; }
+                            if (ch.QuestInventory != null) { for (int ii = 0; ii < ch.QuestInventory.Length; ii++) if (ch.QuestInventory[ii] != null) cQuest++; }
+                            MessageQueue.Enqueue($"Saving items for CharId={ch.Index} Name={ch.Name} inv={cInv} eq={cEq} quest={cQuest}");
+                            itemRepo.SaveItems(ch.Index, ch.Inventory, ch.Equipment, ch.QuestInventory);
+                        }
+                    }
+                }
+                catch (Exception exItemSave)
+                {
+                    MessageQueue.Enqueue($"MariaDB item save failed: {exItemSave.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageQueue.Enqueue($"MariaDB character save failed: {ex.Message}");
             }
         }
 
@@ -1606,6 +1720,7 @@ namespace Server.MirEnvir
                                 }
 
                                 // Copy fields from DB (do not touch Characters list)
+                                acc.Index = dbAcc.Index;
                                 acc.SetPasswordHashAndSalt(dbAcc.Password, dbAcc.Salt);
                                 acc.RequirePasswordChange = dbAcc.RequirePasswordChange;
                                 acc.UserName = dbAcc.UserName;
@@ -1642,10 +1757,69 @@ namespace Server.MirEnvir
                             }
                             AccountList = filtered;
 
-                            // Rebuild CharacterList since we may have appended new accounts
-                            CharacterList.Clear();
-                            for (int iA = 0; iA < AccountList.Count; iA++)
-                                CharacterList.AddRange(AccountList[iA].Characters);
+                            // Load Characters from MariaDB for each account
+                            try
+                            {
+                                var charRepo = new CharacterRepository(
+                                    Settings.MariaDB_Host,
+                                    Settings.MariaDB_Port,
+                                    Settings.MariaDB_Database,
+                                    Settings.MariaDB_User,
+                                    Settings.MariaDB_Password,
+                                    Settings.MariaDB_SslRequired);
+                                var itemRepo = new CharacterItemRepository(
+                                    Settings.MariaDB_Host,
+                                    Settings.MariaDB_Port,
+                                    Settings.MariaDB_Database,
+                                    Settings.MariaDB_User,
+                                    Settings.MariaDB_Password,
+                                    Settings.MariaDB_SslRequired);
+
+                                CharacterList.Clear();
+                                for (int iA = 0; iA < AccountList.Count; iA++)
+                                {
+                                    var acc = AccountList[iA];
+                                    acc.Characters = charRepo.LoadCharactersByAccount(acc.Index);
+                                    for (int iC = 0; iC < acc.Characters.Count; iC++)
+                                    {
+                                        var ch = acc.Characters[iC];
+                                        ch.AccountInfo = acc;
+                                        try
+                                        {
+                                            var (inv, eq, quest) = itemRepo.LoadItemsByCharacter(ch.Index);
+                                            ch.Inventory = inv;
+                                            ch.Equipment = eq;
+                                            ch.QuestInventory = quest;
+
+                                            // Bind items so ItemInfo is resolved and state is consistent
+                                            if (ch.Inventory != null)
+                                            {
+                                                for (int ii = 0; ii < ch.Inventory.Length; ii++)
+                                                    if (ch.Inventory[ii] != null) BindItem(ch.Inventory[ii]);
+                                            }
+                                            if (ch.Equipment != null)
+                                            {
+                                                for (int ii = 0; ii < ch.Equipment.Length; ii++)
+                                                    if (ch.Equipment[ii] != null) BindItem(ch.Equipment[ii]);
+                                            }
+                                            if (ch.QuestInventory != null)
+                                            {
+                                                for (int ii = 0; ii < ch.QuestInventory.Length; ii++)
+                                                    if (ch.QuestInventory[ii] != null) BindItem(ch.QuestInventory[ii]);
+                                            }
+                                        }
+                                        catch (Exception exLoadItems)
+                                        {
+                                            MessageQueue.Enqueue($"MariaDB items load failed for char {ch.Index}: {exLoadItems.Message}");
+                                        }
+                                    }
+                                    CharacterList.AddRange(acc.Characters);
+                                }
+                            }
+                            catch (Exception exChars)
+                            {
+                                MessageQueue.Enqueue($"MariaDB characters load failed: {exChars.Message}");
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -2637,7 +2811,29 @@ namespace Server.MirEnvir
                     return;
                 }
 
-                var info = new CharacterInfo(p, c) { Index = ++NextCharacterID, AccountInfo = c.Account };
+                var info = new CharacterInfo(p, c) { AccountInfo = c.Account };
+
+                // Persist new character to MariaDB first to get DB-generated Id
+                try
+                {
+                    var repo = new CharacterRepository(
+                        Settings.MariaDB_Host,
+                        Settings.MariaDB_Port,
+                        Settings.MariaDB_Database,
+                        Settings.MariaDB_User,
+                        Settings.MariaDB_Password,
+                        Settings.MariaDB_SslRequired);
+
+                    // Use account DB Id for FK
+                    var newId = repo.CreateCharacter(c.Account.Index, info);
+                    info.Index = newId;
+                }
+                catch (Exception ex)
+                {
+                    MessageQueue.Enqueue($"MariaDB create character failed: {ex.Message}");
+                    // Fallback to legacy increment to avoid blocking creation
+                    info.Index = ++NextCharacterID;
+                }
 
                 c.Account.Characters.Add(info);
                 CharacterList.Add(info);

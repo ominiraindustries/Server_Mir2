@@ -7,15 +7,31 @@ Este repositorio contiene el servidor (lógica de juego y GUI) y documentación 
 ## Requisitos
 - .NET SDK (versión indicada por `global.json` o la usada en los scripts de build)
 - Windows (probado en Windows 10/11)
+- MariaDB/MySQL accesible (recomendado MariaDB 10.5+). Configura conexión en `Configs/Setup.ini`.
 
 ## Compilación
 - Script recomendado:
   - `./build-all.ps1` (genera artefactos en `Build/Server/Release/`)
 
 ## Ejecución rápida
-1) Copia/ajusta configuración en `Configs/Setup.ini` (ver ejemplo en `Docs/Setup.ini.example`).
-2) Ejecuta `Build/Server/Release/Server.exe` (o `Server.dll`).
-3) Logs generales: `Logs/`.
+1) Base de datos: crea el esquema mínimo de cuentas ejecutando `Docs/sql/schema_accounts_only.sql` en tu MariaDB.
+2) Copia/ajusta configuración en `Configs/Setup.ini` (ver ejemplo en `Docs/Setup.ini.example`). Asegúrate de completar las claves `MariaDB_*`.
+3) Ejecuta `Build/Server/Release/Server.exe` (o `Server.dll`).
+4) Logs generales: `Logs/`.
+
+Importante (0.3.4): para persistencia de ítems ejecutar también `Docs/sql/schema_characters_only.sql` y `Docs/sql/schema_character_items.sql` en la misma base de datos.
+
+## Cuentas en MariaDB (0.3.3)
+Desde la versión 0.3.3, las cuentas se guardan y leen desde MariaDB como fuente de verdad.
+
+- Lectura/GUI: el servidor carga y muestra únicamente cuentas existentes en MariaDB.
+- Creación: nuevas cuentas se crean directamente en la tabla `Accounts` y el `Id` autoincremental pasa a ser `Index` interno.
+- Guardado: en cada guardado, `AccountList` se sincroniza con DB mediante upsert.
+- Esquema requerido (ver `Docs/sql/schema_accounts_only.sql`):
+  - `Accounts.Id` PRIMARY KEY AUTO_INCREMENT
+  - `Accounts.AccountID` UNIQUE KEY
+- Configuración necesaria en `Configs/Setup.ini`:
+  - `MariaDB_Host`, `MariaDB_Port`, `MariaDB_Database`, `MariaDB_User`, `MariaDB_Password`, `MariaDB_SslRequired`
 
 ## Seguridad de Economía e Ítems (0.3.x)
 Se centralizó el manejo de oro y se agregó auditoría y límites configurables. Además, se amplió la auditoría a movimientos de ítems.
@@ -51,6 +67,19 @@ Logs de seguridad:
 
 ## Changelog
 
+### 0.3.4
+- Persistencia de ítems de personaje (Inventory/Equipment/Quest) en MariaDB usando la tabla `CharacterItems`.
+- Repositorio `CharacterItemRepository` para cargar/guardar con serialización binaria de `UserItem`.
+- Al cargar, los ítems se "bindean" para resolver `ItemInfo` correctamente.
+- Guardado a MariaDB ocurre en cada autosave y al cerrar/guardar el servidor.
+- Se inserta el personaje en DB si su `Index` es 0 antes de guardar ítems (asegura FK válida).
+- Bugfix: `NullReferenceException` en `CharacterInfo.Save()` al serializar `Heroes` (se añade guardia y se usa `MaximumHeroCount`).
+
+### 0.3.3
+- Cuentas migradas completamente a MariaDB (lectura y escritura).
+- Creación de cuentas directamente en DB con `Id` como `Index`.
+- Guardados realizan upsert de cuentas a la base de datos.
+
 ### 0.3.2
 - GUI: `PlayerInfoForm` añade recuadro "Gold Actions" (Give/Take) para oro por personaje (`Character.Gold`). Funciona con jugadores online y offline.
 - GUI: pestaña "Players Online" muestra columna de oro y refresco en vivo.
@@ -75,6 +104,10 @@ Logs de seguridad:
 ## Contribución
 - Rama de trabajo: `feature/net8-upgrade`.
 - Hacer PRs contra la rama principal cuando corresponda.
+
+## Notas de autosave (0.3.4)
+- El servidor realiza autosave cada `SaveDelay` minutos (configurable en `Settings`/`Setup.ini`).
+- Durante el autosave, se ejecuta la persistencia en MariaDB de cuentas, personajes e ítems (`BeginSaveAccounts`).
 
 ## Licencia
 - Ver archivo LICENSE si aplica.
