@@ -1489,6 +1489,207 @@ namespace Server.MirEnvir
                 {
                     MessageQueue.Enqueue($"MariaDB item save failed: {exItemSave.Message}");
                 }
+
+                // Save magics
+                try
+                {
+                    var magicRepo = new Server.MirDatabase.Repositories.CharacterMagicRepository(
+                        Settings.MariaDB_Host,
+                        Settings.MariaDB_Port,
+                        Settings.MariaDB_Database,
+                        Settings.MariaDB_User,
+                        Settings.MariaDB_Password,
+                        Settings.MariaDB_SslRequired);
+
+                    for (int i = 0; i < AccountList.Count; i++)
+                    {
+                        var acc = AccountList[i];
+                        for (int j = 0; j < acc.Characters.Count; j++)
+                        {
+                            var ch = acc.Characters[j];
+                            var cnt = ch.Magics?.Count ?? 0;
+                            MessageQueue.Enqueue($"Saving magics for CharId={ch.Index} Name={ch.Name} count={cnt}");
+                            magicRepo.SaveMagics(ch.Index, ch.Magics);
+                        }
+                    }
+                }
+                catch (Exception exMagicSave)
+                {
+                    MessageQueue.Enqueue($"MariaDB magic save failed: {exMagicSave.Message}");
+                }
+
+                // Save buffs
+                try
+                {
+                    var buffRepo = new Server.MirDatabase.Repositories.CharacterBuffRepository(
+                        Settings.MariaDB_Host,
+                        Settings.MariaDB_Port,
+                        Settings.MariaDB_Database,
+                        Settings.MariaDB_User,
+                        Settings.MariaDB_Password,
+                        Settings.MariaDB_SslRequired);
+
+                    for (int i = 0; i < AccountList.Count; i++)
+                    {
+                        var acc = AccountList[i];
+                        for (int j = 0; j < acc.Characters.Count; j++)
+                        {
+                            var ch = acc.Characters[j];
+                            var cnt = ch.Buffs?.Count ?? 0;
+                            MessageQueue.Enqueue($"Saving buffs for CharId={ch.Index} Name={ch.Name} count={cnt}");
+                            buffRepo.SaveBuffs(ch.Index, ch.Buffs);
+                        }
+                    }
+                }
+                catch (Exception exBuffSave)
+                {
+                    MessageQueue.Enqueue($"MariaDB buff save failed: {exBuffSave.Message}");
+                }
+
+                // Save quest progress
+                try
+                {
+                    var questRepo = new Server.MirDatabase.Repositories.QuestProgressRepository(
+                        Settings.MariaDB_Host,
+                        Settings.MariaDB_Port,
+                        Settings.MariaDB_Database,
+                        Settings.MariaDB_User,
+                        Settings.MariaDB_Password,
+                        Settings.MariaDB_SslRequired);
+
+                    for (int i = 0; i < AccountList.Count; i++)
+                    {
+                        var acc = AccountList[i];
+                        for (int j = 0; j < acc.Characters.Count; j++)
+                        {
+                            var ch = acc.Characters[j];
+                            try
+                            {
+                                // NOTE: Repository does not support bulk upsert; skipping quest progress save for now.
+                                // Future: Serialize each QuestProgressInfo to a byte[] and call questRepo.Upsert(ch.Index, questId, state, data).
+                            }
+                            catch (Exception exQ)
+                            {
+                                MessageQueue.Enqueue($"MariaDB quest save failed for char {ch.Index}: {exQ.Message}");
+                            }
+                        }
+                    }
+                }
+                catch (Exception exQuestSave)
+                {
+                    MessageQueue.Enqueue($"MariaDB quest save failed: {exQuestSave.Message}");
+                }
+
+                // Save friends/blocks
+                try
+                {
+                    var fbRepo = new Server.MirDatabase.Repositories.FriendsBlocksRepository(
+                        Settings.MariaDB_Host,
+                        Settings.MariaDB_Port,
+                        Settings.MariaDB_Database,
+                        Settings.MariaDB_User,
+                        Settings.MariaDB_Password,
+                        Settings.MariaDB_SslRequired);
+
+                    for (int i = 0; i < AccountList.Count; i++)
+                    {
+                        var acc = AccountList[i];
+                        for (int j = 0; j < acc.Characters.Count; j++)
+                        {
+                            var ch = acc.Characters[j];
+                            try
+                            {
+                                // Load current DB state
+                                var dbFriends = new HashSet<int>(fbRepo.GetFriends(ch.Index));
+                                var dbBlocks = new HashSet<int>(fbRepo.GetBlocks(ch.Index));
+
+                                // Desired state from memory
+                                var desiredFriends = new HashSet<int>();
+                                var desiredBlocks = new HashSet<int>();
+                                if (ch.Friends != null)
+                                {
+                                    for (int f = 0; f < ch.Friends.Count; f++)
+                                    {
+                                        var fi = ch.Friends[f];
+                                        if (fi?.Info == null) continue;
+                                        if (fi.Blocked) desiredBlocks.Add(fi.Info.Index); else desiredFriends.Add(fi.Info.Index);
+                                    }
+                                }
+
+                                // Apply diffs: friends
+                                foreach (var id in desiredFriends)
+                                {
+                                    if (!dbFriends.Contains(id)) fbRepo.AddFriend(ch.Index, id);
+                                }
+                                foreach (var id in dbFriends)
+                                {
+                                    if (!desiredFriends.Contains(id)) fbRepo.RemoveFriend(ch.Index, id);
+                                }
+
+                                // Apply diffs: blocks
+                                foreach (var id in desiredBlocks)
+                                {
+                                    if (!dbBlocks.Contains(id)) fbRepo.AddBlock(ch.Index, id);
+                                }
+                                foreach (var id in dbBlocks)
+                                {
+                                    if (!desiredBlocks.Contains(id)) fbRepo.RemoveBlock(ch.Index, id);
+                                }
+                            }
+                            catch (Exception exFB)
+                            {
+                                MessageQueue.Enqueue($"MariaDB friends/blocks save failed for char {ch.Index}: {exFB.Message}");
+                            }
+                        }
+                    }
+                }
+                catch (Exception exFBulk)
+                {
+                    MessageQueue.Enqueue($"MariaDB friends/blocks save failed: {exFBulk.Message}");
+                }
+
+                // Save personal storage (bank)
+                try
+                {
+                    var storageRepo = new Server.MirDatabase.Repositories.CharacterStorageRepository(
+                        Settings.MariaDB_Host,
+                        Settings.MariaDB_Port,
+                        Settings.MariaDB_Database,
+                        Settings.MariaDB_User,
+                        Settings.MariaDB_Password,
+                        Settings.MariaDB_SslRequired);
+
+                    for (int i = 0; i < AccountList.Count; i++)
+                    {
+                        var acc = AccountList[i];
+                        for (int j = 0; j < acc.Characters.Count; j++)
+                        {
+                            var ch = acc.Characters[j];
+                            try
+                            {
+                                // Persist account storage if present
+                                if (ch?.AccountInfo?.Storage != null)
+                                {
+                                    var items = new List<(int Slot, UserItem Item)>();
+                                    var arr = ch.AccountInfo.Storage;
+                                    for (int s = 0; s < arr.Length; s++)
+                                    {
+                                        if (arr[s] != null) items.Add((s, arr[s]));
+                                    }
+                                    storageRepo.ReplaceAll(ch.Index, items);
+                                }
+                            }
+                            catch (Exception exSt)
+                            {
+                                MessageQueue.Enqueue($"MariaDB storage save failed for char {ch.Index}: {exSt.Message}");
+                            }
+                        }
+                    }
+                }
+                catch (Exception exStorageSave)
+                {
+                    MessageQueue.Enqueue($"MariaDB storage save failed: {exStorageSave.Message}");
+                }
             }
             catch (Exception ex)
             {
@@ -1774,6 +1975,20 @@ namespace Server.MirEnvir
                                     Settings.MariaDB_User,
                                     Settings.MariaDB_Password,
                                     Settings.MariaDB_SslRequired);
+                                var magicRepo = new Server.MirDatabase.Repositories.CharacterMagicRepository(
+                                    Settings.MariaDB_Host,
+                                    Settings.MariaDB_Port,
+                                    Settings.MariaDB_Database,
+                                    Settings.MariaDB_User,
+                                    Settings.MariaDB_Password,
+                                    Settings.MariaDB_SslRequired);
+                                var buffRepo = new Server.MirDatabase.Repositories.CharacterBuffRepository(
+                                    Settings.MariaDB_Host,
+                                    Settings.MariaDB_Port,
+                                    Settings.MariaDB_Database,
+                                    Settings.MariaDB_User,
+                                    Settings.MariaDB_Password,
+                                    Settings.MariaDB_SslRequired);
 
                                 CharacterList.Clear();
                                 for (int iA = 0; iA < AccountList.Count; iA++)
@@ -1807,6 +2022,107 @@ namespace Server.MirEnvir
                                                 for (int ii = 0; ii < ch.QuestInventory.Length; ii++)
                                                     if (ch.QuestInventory[ii] != null) BindItem(ch.QuestInventory[ii]);
                                             }
+
+                                            // Load magics
+                                            try
+                                            {
+                                                var magics = magicRepo.LoadMagicsByCharacter(ch.Index);
+                                                ch.Magics = magics ?? new List<UserMagic>();
+                                            }
+                                            catch (Exception exLoadMagics)
+                                            {
+                                                MessageQueue.Enqueue($"MariaDB magics load failed for char {ch.Index}: {exLoadMagics.Message}");
+                                            }
+
+                                            // Load buffs
+                                            try
+                                            {
+                                                var buffs = buffRepo.LoadBuffsByCharacter(ch.Index);
+                                                ch.Buffs = buffs ?? new List<Buff>();
+                                            }
+                                            catch (Exception exLoadBuffs)
+                                            {
+                                                MessageQueue.Enqueue($"MariaDB buffs load failed for char {ch.Index}: {exLoadBuffs.Message}");
+                                            }
+
+                                            // Load quest progress
+                                            try
+                                            {
+                                                var qRepo = new Server.MirDatabase.Repositories.QuestProgressRepository(
+                                                    Settings.MariaDB_Host,
+                                                    Settings.MariaDB_Port,
+                                                    Settings.MariaDB_Database,
+                                                    Settings.MariaDB_User,
+                                                    Settings.MariaDB_Password,
+                                                    Settings.MariaDB_SslRequired);
+                                                // TODO: Map DB quest tuples to QuestProgressInfo if/when serialization format is defined.
+                                                // For now, keep quests loaded from binary.
+                                                var _ = qRepo.LoadByCharacter(ch.Index);
+                                            }
+                                            catch (Exception exLoadQ)
+                                            {
+                                                MessageQueue.Enqueue($"MariaDB quest load failed for char {ch.Index}: {exLoadQ.Message}");
+                                            }
+
+                                            // Load friends/blocks
+                                            try
+                                            {
+                                                var fbRepo = new Server.MirDatabase.Repositories.FriendsBlocksRepository(
+                                                    Settings.MariaDB_Host,
+                                                    Settings.MariaDB_Port,
+                                                    Settings.MariaDB_Database,
+                                                    Settings.MariaDB_User,
+                                                    Settings.MariaDB_Password,
+                                                    Settings.MariaDB_SslRequired);
+                                                var fIds = fbRepo.GetFriends(ch.Index) ?? new List<int>();
+                                                var bIds = fbRepo.GetBlocks(ch.Index) ?? new List<int>();
+                                                var friends = new List<FriendInfo>();
+                                                for (int ii = 0; ii < fIds.Count; ii++)
+                                                {
+                                                    var ci = GetCharacterInfo(fIds[ii]);
+                                                    if (ci != null) friends.Add(new FriendInfo(ci, false));
+                                                }
+                                                for (int ii = 0; ii < bIds.Count; ii++)
+                                                {
+                                                    var ci = GetCharacterInfo(bIds[ii]);
+                                                    if (ci != null) friends.Add(new FriendInfo(ci, true));
+                                                }
+                                                ch.Friends = friends;
+                                            }
+                                            catch (Exception exLoadFB)
+                                            {
+                                                MessageQueue.Enqueue($"MariaDB friends/blocks load failed for char {ch.Index}: {exLoadFB.Message}");
+                                            }
+
+                                            // Load personal storage (bank)
+                                            try
+                                            {
+                                                var storageRepo = new Server.MirDatabase.Repositories.CharacterStorageRepository(
+                                                    Settings.MariaDB_Host,
+                                                    Settings.MariaDB_Port,
+                                                    Settings.MariaDB_Database,
+                                                    Settings.MariaDB_User,
+                                                    Settings.MariaDB_Password,
+                                                    Settings.MariaDB_SslRequired);
+                                                var entries = storageRepo.LoadStorage(ch.Index);
+                                                if (ch.AccountInfo != null && ch.AccountInfo.Storage != null)
+                                                {
+                                                    // Clear and ensure enough size
+                                                    var maxSlot = 0;
+                                                    for (int e = 0; e < entries.Count; e++) if (entries[e].Slot > maxSlot) maxSlot = entries[e].Slot;
+                                                    if (ch.AccountInfo.Storage.Length <= maxSlot)
+                                                    {
+                                                        Array.Resize(ref ch.AccountInfo.Storage, maxSlot + 1);
+                                                    }
+                                                    for (int s = 0; s < ch.AccountInfo.Storage.Length; s++) ch.AccountInfo.Storage[s] = null;
+                                                    for (int e = 0; e < entries.Count; e++) ch.AccountInfo.Storage[entries[e].Slot] = entries[e].Item;
+                                                }
+                                            }
+                                            catch (Exception exLoadStorage)
+                                            {
+                                                MessageQueue.Enqueue($"MariaDB storage load failed for char {ch.Index}: {exLoadStorage.Message}");
+                                            }
+
                                         }
                                         catch (Exception exLoadItems)
                                         {

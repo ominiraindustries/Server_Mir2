@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using Timer = Server.MirEnvir.Timer;
 using Server.MirObjects.Monsters;
 using System.Threading;
+using Server.MirDatabase.Repositories;
 
 namespace Server.MirObjects
 {
@@ -8002,6 +8003,28 @@ namespace Server.MirObjects
 
                 SpendGold(cost, panelType == MarketPanelType.Consign ? "market_consign_fee" : "market_auction_fee");
                 RefreshBagWeight();
+
+                // Persist auction create to DB and sync AuctionID
+                try
+                {
+                    var repo = new AuctionRepository(
+                        Settings.MariaDB_Host,
+                        Settings.MariaDB_Port,
+                        Settings.MariaDB_Database,
+                        Settings.MariaDB_User,
+                        Settings.MariaDB_Password,
+                        Settings.MariaDB_SslRequired);
+
+                    DateTime expiresAt = Envir.Now.AddDays(Globals.ConsignmentLength);
+                    ulong startPrice = (ulong)auction.Price;
+                    ulong? buyout = auction.ItemType == MarketItemType.Consign ? (ulong?)auction.Price : null;
+                    long dbId = repo.Create(Info.Index, auction.Item, startPrice, buyout, expiresAt);
+                    auction.AuctionID = (ulong)dbId;
+                }
+                catch (Exception ex)
+                {
+                    MessageQueue.Enqueue($"MariaDB auction create failed: {ex.Message}");
+                }
             }
 
             Enqueue(p);
@@ -8239,6 +8262,23 @@ namespace Server.MirObjects
                             SpendGold(auction.Price, "market_buy");
                             GainItem(auction.Item);
 
+                            // Persist sold state
+                            try
+                            {
+                                var repo = new Server.MirDatabase.Repositories.AuctionRepository(
+                                    Settings.MariaDB_Host,
+                                    Settings.MariaDB_Port,
+                                    Settings.MariaDB_Database,
+                                    Settings.MariaDB_User,
+                                    Settings.MariaDB_Password,
+                                    Settings.MariaDB_SslRequired);
+                                repo.MarkSold((long)auction.AuctionID, Info.Index, auction.Price);
+                            }
+                            catch (Exception ex)
+                            {
+                                MessageQueue.Enqueue($"MariaDB auction mark-sold failed: {ex.Message}");
+                            }
+
                             Envir.MessageAccount(auction.SellerInfo.AccountInfo, string.Format("You sold {0} for {1:#,##0} Gold", auction.Item.FriendlyName, auction.Price), ChatType.Hint);
                             Enqueue(new S.MarketSuccess { Message = string.Format("You bought {0} for {1:#,##0} Gold", auction.Item.FriendlyName, auction.Price) });
                             MarketSearch(MatchName, MatchType);
@@ -8341,6 +8381,23 @@ namespace Server.MirObjects
                     Envir.MailCharacter(auction.CurrentBuyerInfo, item: auction.Item, customMessage: message);
                     Envir.MessageAccount(auction.CurrentBuyerInfo.AccountInfo, string.Format("You bought {0} for {1:#,##0} Gold", auction.Item.FriendlyName, auction.CurrentBid), ChatType.Hint);
 
+                    // Persist sold state
+                    try
+                    {
+                        var repo = new Server.MirDatabase.Repositories.AuctionRepository(
+                            Settings.MariaDB_Host,
+                            Settings.MariaDB_Port,
+                            Settings.MariaDB_Database,
+                            Settings.MariaDB_User,
+                            Settings.MariaDB_Password,
+                            Settings.MariaDB_SslRequired);
+                        repo.MarkSold((long)auction.AuctionID, auction.CurrentBuyerIndex, auction.CurrentBid);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageQueue.Enqueue($"MariaDB auction mark-sold failed: {ex.Message}");
+                    }
+
                     Account.Auctions.Remove(auction);
                     Envir.Auctions.Remove(auction);
                     GainGold(gold);
@@ -8397,6 +8454,23 @@ namespace Server.MirObjects
                             string message = string.Format("You have been outbid on {0}. Refunded {1:#,##0} Gold.", auction.Item.FriendlyName, auction.CurrentBid);
 
                             Envir.MailCharacter(auction.CurrentBuyerInfo, gold: auction.CurrentBid, customMessage: message);
+                        }
+
+                        // Persist cancel or expire
+                        try
+                        {
+                            var repo = new Server.MirDatabase.Repositories.AuctionRepository(
+                                Settings.MariaDB_Host,
+                                Settings.MariaDB_Port,
+                                Settings.MariaDB_Database,
+                                Settings.MariaDB_User,
+                                Settings.MariaDB_Password,
+                                Settings.MariaDB_SslRequired);
+                            if (auction.Expired) repo.Expire((long)auction.AuctionID); else repo.Cancel((long)auction.AuctionID);
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageQueue.Enqueue($"MariaDB auction finalize failed: {ex.Message}");
                         }
 
                         Account.Auctions.Remove(auction);
@@ -11110,6 +11184,26 @@ namespace Server.MirObjects
             };
 
             mail.Send();
+
+            // Persist to MariaDB
+            try
+            {
+                var repo = new MailRepository(
+                    Settings.MariaDB_Host,
+                    Settings.MariaDB_Port,
+                    Settings.MariaDB_Database,
+                    Settings.MariaDB_User,
+                    Settings.MariaDB_Password,
+                    Settings.MariaDB_SslRequired);
+
+                long dbId = repo.CreateMail(player.Index, Info.Name, string.Empty, message, 0, null);
+                // Align in-memory id with DB id
+                mail.MailID = (ulong)dbId;
+            }
+            catch (Exception ex)
+            {
+                MessageQueue.Enqueue($"MariaDB mail create failed: {ex.Message}");
+            }
         }
 
         public void SendMail(string name, string message, uint gold, ulong[] items, bool stamped)
@@ -11203,7 +11297,6 @@ namespace Server.MirObjects
             //Create parcel
             MailInfo mail = new MailInfo(player.Index, true)
             {
-                MailID = ++Envir.NextMailID,
                 Sender = Info.Name,
                 Message = message,
                 Gold = gold,
@@ -11211,6 +11304,30 @@ namespace Server.MirObjects
             };
 
             mail.Send();
+
+            // Persist to MariaDB
+            try
+            {
+                var repo = new MailRepository(
+                    Settings.MariaDB_Host,
+                    Settings.MariaDB_Port,
+                    Settings.MariaDB_Database,
+                    Settings.MariaDB_User,
+                    Settings.MariaDB_Password,
+                    Settings.MariaDB_SslRequired);
+
+                // map attachments to slots in order
+                var attachments = new List<(int Slot, UserItem Item)>();
+                for (int i = 0; i < giftItems.Count; i++) attachments.Add((i, giftItems[i]));
+
+                long dbId = repo.CreateMail(player.Index, Info.Name, string.Empty, message, gold, attachments);
+                // Align in-memory id with DB id
+                mail.MailID = (ulong)dbId;
+            }
+            catch (Exception ex)
+            {
+                MessageQueue.Enqueue($"MariaDB mail create failed: {ex.Message}");
+            }
 
             Enqueue(new S.MailSent { Result = 1 });
         }
@@ -11222,6 +11339,23 @@ namespace Server.MirObjects
             if (mail == null) return;
 
             mail.DateOpened = Envir.Now;
+
+            // Persist read timestamp
+            try
+            {
+                var repo = new MailRepository(
+                    Settings.MariaDB_Host,
+                    Settings.MariaDB_Port,
+                    Settings.MariaDB_Database,
+                    Settings.MariaDB_User,
+                    Settings.MariaDB_Password,
+                    Settings.MariaDB_SslRequired);
+                repo.MarkRead((long)mail.MailID);
+            }
+            catch (Exception ex)
+            {
+                MessageQueue.Enqueue($"MariaDB mail mark-read failed: {ex.Message}");
+            }
 
             GetMail();
         }
@@ -11267,6 +11401,23 @@ namespace Server.MirObjects
 
             mail.Collected = true;
 
+            // Persist claim timestamp
+            try
+            {
+                var repo = new MailRepository(
+                    Settings.MariaDB_Host,
+                    Settings.MariaDB_Port,
+                    Settings.MariaDB_Database,
+                    Settings.MariaDB_User,
+                    Settings.MariaDB_Password,
+                    Settings.MariaDB_SslRequired);
+                repo.MarkClaimed((long)mail.MailID);
+            }
+            catch (Exception ex)
+            {
+                MessageQueue.Enqueue($"MariaDB mail mark-claimed failed: {ex.Message}");
+            }
+
             Enqueue(new S.ParcelCollected { Result = 1 });
 
             GetMail();
@@ -11279,6 +11430,23 @@ namespace Server.MirObjects
             if (mail == null) return;
 
             Info.Mail.Remove(mail);
+
+            // Soft delete in DB
+            try
+            {
+                var repo = new MailRepository(
+                    Settings.MariaDB_Host,
+                    Settings.MariaDB_Port,
+                    Settings.MariaDB_Database,
+                    Settings.MariaDB_User,
+                    Settings.MariaDB_Password,
+                    Settings.MariaDB_SslRequired);
+                repo.SoftDelete((long)mail.MailID);
+            }
+            catch (Exception ex)
+            {
+                MessageQueue.Enqueue($"MariaDB mail delete failed: {ex.Message}");
+            }
 
             GetMail();
         }

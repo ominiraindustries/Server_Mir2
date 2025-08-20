@@ -973,7 +973,30 @@ namespace Server.MirNetwork
                 }
             }
 
+            // Load character variables (NPCVar) from MariaDB before starting the game
+            List<KeyValuePair<string, string>> loadedVars = null;
+            try
+            {
+                var varRepo = new Server.MirDatabase.Repositories.CharacterVariableRepository(
+                    Settings.MariaDB_Host,
+                    Settings.MariaDB_Port,
+                    Settings.MariaDB_Database,
+                    Settings.MariaDB_User,
+                    Settings.MariaDB_Password,
+                    Settings.MariaDB_SslRequired);
+
+                loadedVars = varRepo.LoadVariablesByCharacter(info.Index) ?? new List<KeyValuePair<string, string>>();
+                MessageQueue.Enqueue($"Loaded variables for char {info.Index} count={loadedVars.Count}");
+            }
+            catch (Exception exVarLoad)
+            {
+                MessageQueue.Enqueue($"MariaDB variables load failed for char {info.Index}: {exVarLoad.Message}");
+                loadedVars = new List<KeyValuePair<string, string>>();
+            }
+
             Player = new PlayerObject(info, this);
+            if (loadedVars != null)
+                Player.NPCVar = loadedVars;
             Player.StartGame();
 
             if (migrateAmount > 0)

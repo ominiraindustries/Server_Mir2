@@ -14,12 +14,12 @@ Este repositorio contiene el servidor (lógica de juego y GUI) y documentación 
   - `./build-all.ps1` (genera artefactos en `Build/Server/Release/`)
 
 ## Ejecución rápida
-1) Base de datos: crea el esquema mínimo de cuentas ejecutando `Docs/sql/schema_accounts_only.sql` en tu MariaDB.
+1) Base de datos: aplica el esquema unificado `Docs/sql/schema_all.sql` en tu MariaDB.
 2) Copia/ajusta configuración en `Configs/Setup.ini` (ver ejemplo en `Docs/Setup.ini.example`). Asegúrate de completar las claves `MariaDB_*`.
 3) Ejecuta `Build/Server/Release/Server.exe` (o `Server.dll`).
 4) Logs generales: `Logs/`.
 
-Importante (0.3.4): para persistencia de ítems ejecutar también `Docs/sql/schema_characters_only.sql` y `Docs/sql/schema_character_items.sql` en la misma base de datos.
+Importante (0.3.5): usa el esquema unificado `Docs/sql/schema_all.sql` (incluye cuentas, personajes, ítems, storage de personaje, amigos/bloqueos y subastas).
 
 ## Cuentas en MariaDB (0.3.3)
 Desde la versión 0.3.3, las cuentas se guardan y leen desde MariaDB como fuente de verdad.
@@ -67,6 +67,16 @@ Logs de seguridad:
 
 ## Changelog
 
+### 0.3.5
+- Fixes de compilación en `Server/MirEnvir/Envir.cs` por métodos inexistentes/mal nombrados de repositorios.
+  - Quests: se elimina `UpsertByCharacter(...)` (no existe); queda pendiente serializar cada `QuestProgressInfo` y hacer `Upsert(...)` por quest.
+  - Amigos/Bloqueos: se reemplaza `ReplaceAll(...)`/`GetByCharacter(...)` por `GetFriends/GetBlocks` + `Add*/Remove*` con diff (sincronización idempotente).
+  - Storage de personaje: se usa `CharacterStorageRepository.LoadStorage(...)` y `ReplaceAll(...)` con tuplas `(Slot, Item)` tomando como fuente `AccountInfo.Storage`.
+- Persistencia de Subasta (Auction) en `PlayerObject`:
+  - Alta de subasta, compra directa (consign), puja y "sell now" marcan estado vendido en DB (`AuctionRepository.MarkSold`).
+  - Se registran los compradores/vendedores y precios en la base.
+- Esquema SQL: usar `Docs/sql/schema_all.sql` (consolida Accounts, Characters, CharacterItems, CharacterStorageItems, FriendsBlocks, Auctions, etc.).
+
 ### 0.3.4
 - Persistencia de ítems de personaje (Inventory/Equipment/Quest) en MariaDB usando la tabla `CharacterItems`.
 - Repositorio `CharacterItemRepository` para cargar/guardar con serialización binaria de `UserItem`.
@@ -105,9 +115,15 @@ Logs de seguridad:
 - Rama de trabajo: `feature/net8-upgrade`.
 - Hacer PRs contra la rama principal cuando corresponda.
 
-## Notas de autosave (0.3.4)
+## Notas de autosave (0.3.5)
 - El servidor realiza autosave cada `SaveDelay` minutos (configurable en `Settings`/`Setup.ini`).
-- Durante el autosave, se ejecuta la persistencia en MariaDB de cuentas, personajes e ítems (`BeginSaveAccounts`).
+- Durante el autosave/cierre se persiste en MariaDB:
+  - Cuentas (`Accounts`).
+  - Personajes y datos básicos (`Characters`).
+  - Ítems de personaje: Inventario/Equipo/Quest (`CharacterItems`).
+  - Amigos/Bloqueos (differences) (`FriendsBlocks`).
+  - Storage de personaje completo (`CharacterStorageItems`).
+  - Estado de subastas (ventas/ganadores) (`Auctions`).
 
 ## Licencia
 - Ver archivo LICENSE si aplica.
