@@ -121,6 +121,15 @@ namespace Server
         public static int SaveDelay = 5;
         public static short CredxGold = 30;
 
+        // MariaDB (Accounts) configuration
+        public static bool UseMariaDBForAccounts = true; // Forced: always use MariaDB for accounts
+        public static string MariaDB_Host = "127.0.0.1";
+        public static int MariaDB_Port = 3306;
+        public static string MariaDB_Database = "crystal_mir2";
+        public static string MariaDB_User = "mir";
+        public static string MariaDB_Password = "mir";
+        public static bool MariaDB_SslRequired = false;
+
         //Game
         public static List<long> ExperienceList = new List<long>();
         public static List<long> OrbsExpList = new List<long>();
@@ -442,6 +451,17 @@ namespace Server
             //Database
             SaveDelay = Reader.ReadInt32("Database", "SaveDelay", SaveDelay);
             CredxGold = Reader.ReadInt16("Database", "CredxGold", CredxGold);
+
+            // MariaDB (forced)
+            // Ignore Setup.ini flag and always force MariaDB for accounts
+            // UseMariaDBForAccounts = Reader.ReadBoolean("MariaDB", "UseMariaDBForAccounts", UseMariaDBForAccounts);
+            UseMariaDBForAccounts = true;
+            MariaDB_Host = Reader.ReadString("MariaDB", "Host", MariaDB_Host);
+            MariaDB_Port = Reader.ReadInt32("MariaDB", "Port", MariaDB_Port);
+            MariaDB_Database = Reader.ReadString("MariaDB", "Database", MariaDB_Database);
+            MariaDB_User = Reader.ReadString("MariaDB", "User", MariaDB_User);
+            MariaDB_Password = Reader.ReadString("MariaDB", "Password", MariaDB_Password);
+            MariaDB_SslRequired = Reader.ReadBoolean("MariaDB", "SslRequired", MariaDB_SslRequired);
 
             //Game
             DropRate = Reader.ReadSingle("Game", "DropRate", DropRate);

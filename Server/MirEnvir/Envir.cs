@@ -3,7 +3,9 @@ using Server.MirDatabase;
 using Server.MirNetwork;
 using Server.MirObjects;
 using Server.MirObjects.Monsters;
+using Server.MirDatabase.Repositories;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -1104,6 +1106,9 @@ namespace Server.MirEnvir
                 File.Move(AccountPath + "n", AccountPath);
                 if (File.Exists(AccountPath + "o"))
                     File.Delete(AccountPath + "o");
+
+                // Persist to MariaDB as source of truth
+                SaveAccountsToMariaDB();
             }
             catch (Exception ex)
             {
@@ -1323,6 +1328,8 @@ namespace Server.MirEnvir
                 }
 
                 SaveAccounts(mStream);
+                // Persist to MariaDB as source of truth (before async file flush)
+                SaveAccountsToMariaDB();
                 var fStream = new FileStream(AccountPath + "n", FileMode.Create);
 
                 var data = mStream.ToArray();
@@ -1353,6 +1360,26 @@ namespace Server.MirEnvir
             }
 
             Saving = false;
+        }
+
+        private void SaveAccountsToMariaDB()
+        {
+            try
+            {
+                if (!Settings.UseMariaDBForAccounts) return;
+                var repo = new AccountRepository(
+                    Settings.MariaDB_Host,
+                    Settings.MariaDB_Port,
+                    Settings.MariaDB_Database,
+                    Settings.MariaDB_User,
+                    Settings.MariaDB_Password,
+                    Settings.MariaDB_SslRequired);
+                repo.UpsertAccounts(AccountList);
+            }
+            catch (Exception ex)
+            {
+                MessageQueue.Enqueue($"MariaDB account save failed: {ex.Message}");
+            }
         }
 
         public bool LoadDB()
@@ -1541,6 +1568,89 @@ namespace Server.MirEnvir
                         CharacterList.AddRange(AccountList[i].Characters);
                         if (LoadVersion > 98 && LoadVersion < 103)
                             AccountList[i].Characters.ForEach(character => HeroList.AddRange(character.Heroes));
+                    }
+
+                    // Overlay Accounts from MariaDB (forced; characters remain from binary for now)
+                    { // Forced: always use MariaDB for accounts
+                        try
+                        {
+                            var repo = new AccountRepository(
+                                Settings.MariaDB_Host,
+                                Settings.MariaDB_Port,
+                                Settings.MariaDB_Database,
+                                Settings.MariaDB_User,
+                                Settings.MariaDB_Password,
+                                Settings.MariaDB_SslRequired);
+
+                            var dbAccounts = repo.LoadAccounts();
+
+                            // Build index by AccountID for fast merge
+                            var map = new Dictionary<string, AccountInfo>(StringComparer.OrdinalIgnoreCase);
+                            for (int iAcc = 0; iAcc < AccountList.Count; iAcc++)
+                                map[AccountList[iAcc].AccountID] = AccountList[iAcc];
+
+                            foreach (var dbAcc in dbAccounts)
+                            {
+                                if (string.IsNullOrEmpty(dbAcc.AccountID)) continue;
+
+                                if (!map.TryGetValue(dbAcc.AccountID, out var acc))
+                                {
+                                    // New account present in DB but not in binary: add with empty Characters
+                                    acc = new AccountInfo
+                                    {
+                                        AccountID = dbAcc.AccountID,
+                                        Characters = new List<CharacterInfo>()
+                                    };
+                                    AccountList.Add(acc);
+                                    map[acc.AccountID] = acc;
+                                }
+
+                                // Copy fields from DB (do not touch Characters list)
+                                acc.SetPasswordHashAndSalt(dbAcc.Password, dbAcc.Salt);
+                                acc.RequirePasswordChange = dbAcc.RequirePasswordChange;
+                                acc.UserName = dbAcc.UserName;
+                                acc.BirthDate = dbAcc.BirthDate;
+                                acc.SecretQuestion = dbAcc.SecretQuestion;
+                                acc.SecretAnswer = dbAcc.SecretAnswer;
+                                acc.EMailAddress = dbAcc.EMailAddress;
+                                acc.CreationIP = dbAcc.CreationIP;
+                                acc.CreationDate = dbAcc.CreationDate;
+                                acc.Banned = dbAcc.Banned;
+                                acc.BanReason = dbAcc.BanReason;
+                                acc.ExpiryDate = dbAcc.ExpiryDate;
+                                acc.LastIP = dbAcc.LastIP;
+                                acc.LastDate = dbAcc.LastDate;
+                                acc.HasExpandedStorage = dbAcc.HasExpandedStorage;
+                                acc.ExpandedStorageExpiryDate = dbAcc.ExpandedStorageExpiryDate;
+                                acc.Gold = dbAcc.Gold;
+                                acc.Credit = dbAcc.Credit;
+                                acc.AdminAccount = dbAcc.AdminAccount;
+                                acc.WrongPasswordCount = dbAcc.WrongPasswordCount;
+                            }
+
+                            // Filter AccountList to only those present in MariaDB (source of truth)
+                            var dbIdSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            for (int i = 0; i < dbAccounts.Count; i++)
+                                if (!string.IsNullOrEmpty(dbAccounts[i].AccountID)) dbIdSet.Add(dbAccounts[i].AccountID);
+
+                            var filtered = new List<AccountInfo>();
+                            for (int i = 0; i < AccountList.Count; i++)
+                            {
+                                var acc = AccountList[i];
+                                if (acc != null && !string.IsNullOrEmpty(acc.AccountID) && dbIdSet.Contains(acc.AccountID))
+                                    filtered.Add(acc);
+                            }
+                            AccountList = filtered;
+
+                            // Rebuild CharacterList since we may have appended new accounts
+                            CharacterList.Clear();
+                            for (int iA = 0; iA < AccountList.Count; iA++)
+                                CharacterList.AddRange(AccountList[iA].Characters);
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageQueue.Enqueue($"MariaDB account overlay failed: {ex.Message}");
+                        }
                     }
 
                     foreach (var auction in Auctions)
@@ -2178,10 +2288,28 @@ namespace Server.MirEnvir
                     return;
                 }
 
-                AccountList.Add(new AccountInfo(p) { Index = ++NextAccountID, CreationIP = c.IPAddress });
-
-
-                c.Enqueue(new ServerPackets.NewAccount { Result = 8 });
+                // Create in MariaDB and set Index from DB
+                try
+                {
+                    var acc = new AccountInfo(p) { CreationIP = c.IPAddress };
+                    var repo = new AccountRepository(
+                        Settings.MariaDB_Host,
+                        Settings.MariaDB_Port,
+                        Settings.MariaDB_Database,
+                        Settings.MariaDB_User,
+                        Settings.MariaDB_Password,
+                        Settings.MariaDB_SslRequired);
+                    var newId = repo.CreateAccount(acc);
+                    acc.Index = newId;
+                    if (newId > NextAccountID) NextAccountID = newId;
+                    AccountList.Add(acc);
+                    c.Enqueue(new ServerPackets.NewAccount { Result = 8 });
+                }
+                catch (Exception ex)
+                {
+                    MessageQueue.Enqueue($"MariaDB create account failed: {ex.Message}");
+                    c.Enqueue(new ServerPackets.NewAccount { Result = 0 });
+                }
             }
         }
 
@@ -2229,8 +2357,27 @@ namespace Server.MirEnvir
                     return 7;
                 }
 
-                AccountList.Add(new AccountInfo(p) { Index = ++NextAccountID, CreationIP = ip });
-                return 8;
+                try
+                {
+                    var acc = new AccountInfo(p) { CreationIP = ip };
+                    var repo = new AccountRepository(
+                        Settings.MariaDB_Host,
+                        Settings.MariaDB_Port,
+                        Settings.MariaDB_Database,
+                        Settings.MariaDB_User,
+                        Settings.MariaDB_Password,
+                        Settings.MariaDB_SslRequired);
+                    var newId = repo.CreateAccount(acc);
+                    acc.Index = newId;
+                    if (newId > NextAccountID) NextAccountID = newId;
+                    AccountList.Add(acc);
+                    return 8;
+                }
+                catch (Exception ex)
+                {
+                    MessageQueue.Enqueue($"MariaDB create account (HTTP) failed: {ex.Message}");
+                    return 0;
+                }
             }
         }
 

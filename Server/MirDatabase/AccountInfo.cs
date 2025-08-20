@@ -1,4 +1,4 @@
-﻿using Server.MirNetwork;
+using Server.MirNetwork;
 using Server.MirEnvir;
 using Server.Utils;
 using C = ClientPackets;
@@ -10,6 +10,13 @@ namespace Server.MirDatabase
         protected static Envir Envir
         {
             get { return Envir.Main; }
+        }
+
+        // Allows setting an already-hashed password and salt without rehashing.
+        public void SetPasswordHashAndSalt(string hashedPassword, byte[] salt)
+        {
+            password = hashedPassword ?? string.Empty;
+            Salt = salt ?? new byte[0];
         }
         protected static MessageQueue MessageQueue => MessageQueue.Instance;
 
